@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GrindFlow — Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="left-panel">
+      <div class="brand">
+        <div class="logo">GF</div>
+        <div class="brand-text">
+          <h1>GrindFlow</h1>
+          <p>Peer-powered study notes</p>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-view="home">Home</button>
+        <button class="nav-item" data-view="my-docs">My Documents</button>
+        <button class="nav-item" data-view="upload">Upload</button>
+        <button class="nav-item" data-view="document-pure">Document Viewer</button>
+        <button class="nav-item" data-view="qsui">Quiz / Study Flow</button>
+        <button class="nav-item" data-view="wallet">Wallet</button>
+        <button class="nav-item" data-view="wallet-transactions">Wallet Transactions</button>
+        <button class="nav-item" data-view="settings">Settings</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-mini">
+          <div class="avatar">D</div>
+          <div>
+            <div id="sidebar-username">Devyani</div>
+            <small id="sidebar-coins">Coins: 12.30</small>
+          </div>
+        </div>
+        <button id="logout" class="ghost">Logout</button>
+      </div>
+    </aside>
+
+    <div id="right-area">
+      <header id="topbar">
+        <div class="topbar-left"><h2 id="page-title">Dashboard</h2></div>
+        <div class="topbar-right">
+          <input id="search" placeholder="Search documents..." />
+          <button id="notify">🔔</button>
+          <button id="auth-toggle">Sign In</button>
+          <button id="profile-btn">👤</button>
+        </div>
+      </header>
+
+      <main id="main-content">
+        <!-- Auth dialog -->
+        <section id="auth-panel" class="hidden fade centered">
+          <div class="card">
+            <h3>Sign in to GrindFlow</h3>
+            <p id="auth-status" style="margin-bottom:8px;">Not signed in</p>
+            <div class="row" style="gap:8px; align-items:center;">
+              <input id="auth-email" type="email" placeholder="Email" />
+              <input id="auth-password" type="password" placeholder="Password" />
+            </div>
+            <div class="row" style="gap:8px; margin-top:8px;">
+              <button id="auth-signin" class="primary">Sign In</button>
+              <button id="auth-signup" class="secondary">Sign Up</button>
+              <button id="auth-signout" class="ghost">Sign Out</button>
+            </div>
+            <small>Use email/password accounts enabled in your Supabase project.</small>
+          </div>
+        </section>
+        <!-- Default home content -->
+        <section id="home" class="visible fade">
+          <div class="centered">
+            <div class="card quick-upload">
+              <h3>Upload Document</h3>
+              <input id="file-input" type="file" accept="application/pdf" />
+              <div class="row">
+                <button id="upload-btn" class="primary">Upload</button>
+                <button id="mock-analyze" class="secondary">Mock Analyze</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Other sections -->
+        <section id="my-docs" class="hidden fade centered"><div class="card"><h3>My Documents</h3><p>Your uploaded notes will appear here.</p></div></section>
+        <section id="upload" class="hidden fade centered"><div class="card"><h3>Upload Page</h3><p>Advanced upload and categorization.</p></div></section>
+        <section id="document-pure" class="hidden fade centered"><div class="card"><h3>Document Viewer</h3><p>Detailed AI feedback and document insights.</p></div></section>
+        <section id="qsui" class="hidden fade centered"><div class="card"><h3>Quiz / Study Flow</h3><p>Interactive study mode with generated questions.</p></div></section>
+        <section id="wallet" class="hidden fade centered"><div class="card"><h3>Wallet</h3><p>Track your earnings and redeem coins.</p></div></section>
+        <section id="wallet-transactions" class="hidden fade centered"><div class="card"><h3>Wallet Transactions</h3><ul><li>+0.10 • Quiz Used</li><li>-2.00 • Withdrawn</li></ul></div></section>
+        <section id="settings" class="hidden fade centered"><div class="card"><h3>Settings</h3><p>Profile and preferences coming soon.</p></div></section>
+      </main>
+    </div>
+  </div>
+  <footer id="footer"><small>Built with ❤️ for students — GrindFlow</small></footer>
+
+  <!-- Optional: Supabase for auth (fill these values to enable) -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script>
+    // Set these to your Supabase project to enable authenticated requests
+    window.SUPABASE_URL = 'https://lxmyznmgbvbxzjwvbfnr.supabase.co';
+    // IMPORTANT: Use the anon key in the frontend, never the service role key
+    window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4bXl6bm1nYnZieHpqd3ZiZm5yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA2MjQ4OTAsImV4cCI6MjA3NjIwMDg5MH0.CQ3VvR0khlJfd2vrqJwX2jL_FXgLQ5rQoo33QGPQUfg';
+    // Optional: guest account for prototype (auto-sign-in)
+    window.GUEST_EMAIL = 'abc@gmail.com';
+    window.GUEST_PASSWORD = '123456';
+  </script>
+  <script>
+    window.API_BASE_URL = 'http://localhost:3000';
+  </script>
+  <!-- Sonner (shadcn) toasts via ESM; exposes window.toast -->
+  <script type="module">
+    import React from 'https://esm.sh/react@18';
+    import { createRoot } from 'https://esm.sh/react-dom@18/client';
+    import { Toaster, toast } from 'https://esm.sh/sonner@1';
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    root.render(React.createElement(Toaster, { position: 'top-right', richColors: true }));
+    window.toast = toast;
+  </script>
+  <script src="script.js"></script>
+</body>
+</html>

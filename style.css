@@ -1,0 +1,119 @@
+/* GrindFlow frontend — aesthetic, minimal, student-friendly */
+:root{
+  --bg:#0f1724;
+  --card:#0b1220;
+  --muted:#9aa4b2;
+  --accent:#6c8cff;
+  --glass: rgba(255,255,255,0.04);
+  --radius:14px;
+  --max-width:1100px;
+}
+*{box-sizing:border-box}
+html,body,#app{height:100%}
+body{
+  margin:0;
+  font-family:'Poppins',sans-serif;
+  background: radial-gradient(1200px 600px at 10% 10%, rgba(108,140,255,0.08), transparent),
+              linear-gradient(180deg, #071029, #071129 60%);
+  color:#eaf0ff;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+/* Layout */
+#app{display:flex;min-height:100vh}
+aside#left-panel{
+  width:260px;padding:24px;display:flex;flex-direction:column;gap:18px;
+  background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border-right:1px solid rgba(255,255,255,0.03);
+}
+.hidden{display:none}
+.brand{display:flex;gap:12px;align-items:center}
+.logo{
+  width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#9ad4ff);
+  display:flex;align-items:center;justify-content:center;font-weight:700;color:#071129;font-size:18px;
+}
+.brand-text h1{margin:0;font-size:18px}
+.brand-text p{margin:0;font-size:12px;color:var(--muted)}
+
+/* Sidebar nav */
+.sidebar-nav{display:flex;flex-direction:column;gap:8px}
+.nav-item{
+  text-align:left;padding:10px;border-radius:10px;border:none;background:transparent;color:inherit;cursor:pointer;
+}
+.nav-item.active{background:rgba(108,140,255,0.12);font-weight:600}
+.sidebar-footer{margin-top:auto;display:flex;flex-direction:column;gap:8px}
+.user-mini{display:flex;gap:10px;align-items:center}
+.avatar{width:40px;height:40px;border-radius:10px;background:#10213a;display:flex;align-items:center;justify-content:center;font-weight:700}
+
+/* Right area */
+#right-area{flex:1;display:flex;flex-direction:column}
+#topbar{display:flex;justify-content:space-between;align-items:center;padding:18px 28px;border-bottom:1px solid rgba(255,255,255,0.02)}
+#topbar input{padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+
+/* Main content */
+#main-content{padding:28px;flex:1;max-width:var(--max-width);margin:0 auto;width:100%}
+.centered{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}
+.card{background:var(--card);padding:18px;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,0.6);width:100%}
+.auth-card{display:flex;gap:18px;max-width:920px}
+.auth-left{flex:1;padding:8px}
+.auth-right{width:320px;padding:8px}
+.auth-left h1{margin:0;font-size:28px}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+input,button,select,textarea{font-family:inherit}
+
+/* Login form */
+.login-form{display:flex;flex-direction:column;gap:10px}
+.login-form input{padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+.primary{background:var(--accent);border:none;padding:10px 14px;border-radius:10px;color:#071129;font-weight:700;cursor:pointer}
+.secondary{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:10px 12px;border-radius:10px;color:var(--muted);cursor:pointer}
+.ghost{background:transparent;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:8px;color:var(--muted);cursor:pointer}
+
+/* Dashboard layout */
+.layout{display:grid;grid-template-columns:1fr 380px;gap:18px}
+.panel{display:flex;flex-direction:column;gap:12px}
+.list .item{padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.02);margin-bottom:8px;background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent)}
+.quick-upload input[type=file]{display:block;margin:10px 0}
+.row{display:flex;gap:10px;align-items:center}
+.score-row{display:flex;gap:12px;align-items:center}
+.score-circle{width:68px;height:68px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;background:linear-gradient(135deg,#7fb0ff,#3b6cff);color:#021034;font-size:20px}
+
+/* Responsive */
+@media (max-width:920px){
+  aside#left-panel{display:none}
+  .layout{grid-template-columns:1fr}
+  #topbar{padding:12px}
+}
+
+/* Footer */
+footer{padding:16px;text-align:center;color:var(--muted)}
+
+
+/* Fade transition for smooth section switching */
+.fade {
+  opacity: 0;
+  transition: opacity 0.4s ease-in-out;
+}
+.fade.visible {
+  opacity: 1;
+}
+
+
+/* Align non-home sections to top instead of center */
+#main-content > section {
+  display: none;
+  flex-direction: column;
+  justify-content: flex-start !important;
+  align-items: center;
+  min-height: 80vh;
+}
+#main-content > section.visible {
+  display: flex;
+}
+body.login-page .centered {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}

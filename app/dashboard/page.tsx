@@ -18,6 +18,10 @@ export default function Dashboard() {
   const [docsLoading, setDocsLoading] = useState(false)
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({})
   const [uploading, setUploading] = useState(false)
+  const [analysisQuery, setAnalysisQuery] = useState('')
+  const [analyzingIds, setAnalyzingIds] = useState<Record<string, boolean>>({})
+  const [scores, setScores] = useState<Record<string, { score: number; verdict: string; rationale?: string; focus_topics?: string[]; repetitive_topics?: string[]; suggested_plan?: string[] }>>({})
+  const [detailsDocId, setDetailsDocId] = useState<string>('')
   const [authStatus, setAuthStatus] = useState('Not signed in')
   const [userEmail, setUserEmail] = useState<string>('')
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -158,10 +162,12 @@ export default function Dashboard() {
   async function loadDocuments() {
     try {
       setDocsLoading(true)
+      // Clear current list immediately to avoid showing stale rows during reload
+      setDocuments([])
       const { data: sessionData } = await supabase.auth.getSession()
       const token = sessionData.session?.access_token
       if (!token) return
-      const res = await fetch('/api/documents', { headers: { Authorization: `Bearer ${token}` } })
+      const res = await fetch(`/api/documents?t=${Date.now()}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' as RequestCache })
       if (!res.ok) {
         const text = await res.text()
         throw new Error(text)
@@ -194,7 +200,8 @@ export default function Dashboard() {
         try { const j = await res.json(); msg = j?.error || msg } catch {}
         throw new Error(msg)
       }
-      toast.success('Document removed')
+      const j = await res.json()
+      toast.success(j?.removedFromStorage ? 'Document removed from library and storage' : 'Document removed (file already gone)')
       loadDocuments()
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -203,6 +210,39 @@ export default function Dashboard() {
       await loadDocuments()
     } finally {
       setDeletingIds((s) => { const n = { ...s }; delete n[id]; return n })
+    }
+  }
+
+  async function analyzeDocument(id: string) {
+    try {
+      setAnalyzingIds((s) => ({ ...s, [id]: true }))
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+      if (!token) return
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, context: analysisQuery }),
+      })
+      if (!res.ok) {
+        let msg = 'Failed'
+        try { const j = await res.json(); msg = j?.error || msg } catch {}
+        throw new Error(msg)
+      }
+      const data = await res.json()
+      const r = data?.result
+      if (r?.score != null) {
+        setScores((s) => ({ ...s, [id]: { score: r.score, verdict: r.verdict || '', rationale: r.rationale, focus_topics: r.focus_topics, repetitive_topics: r.repetitive_topics, suggested_plan: r.suggested_plan } }))
+        toast.success(`Score: ${r.score}`)
+      } else {
+        toast.info('Analysis complete, but no score returned')
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[ANALYZE] error', e)
+      toast.error(`Analyze failed: ${(e as any)?.message || ''}`)
+    } finally {
+      setAnalyzingIds((s) => { const n = { ...s }; delete n[id]; return n })
     }
   }
 
@@ -314,6 +354,11 @@ export default function Dashboard() {
               <div className="card">
                 <h3 className="mt-0 mb-4 text-xl font-semibold">My Documents</h3>
                 {docsLoading && <p className="text-muted">Loading…</p>}
+                <div className="mb-3">
+                  <label className="block text-sm text-muted mb-1">Analysis context (what are you studying?)</label>
+                  <input value={analysisQuery} onChange={(e) => setAnalysisQuery(e.target.value)} placeholder="e.g., Midsem exam for MAIT University, Chapters 5-7"
+                    className="input-field w-full" />
+                </div>
                 {!docsLoading && documents.length === 0 && (
                   <p className="text-muted">No documents yet. Upload a PDF from the Dashboard.</p>
                 )}
@@ -324,19 +369,71 @@ export default function Dashboard() {
                         <div className="min-w-0">
                           <div className="font-medium truncate max-w-[520px]">{doc.file_name}</div>
                           <div className="text-xs text-muted">{(doc.size_bytes ? (doc.size_bytes / 1024 / 1024).toFixed(2) : '—')} MB • {doc.created_at ? new Date(doc.created_at).toLocaleString() : ''}</div>
+                          {scores[doc.id] && (
+                            <div className="mt-1 text-sm flex items-center gap-2">
+                              <span>Score: <span className="font-semibold">{scores[doc.id].score}</span> — {scores[doc.id].verdict}</span>
+                              <button className="btn-ghost" onClick={() => setDetailsDocId(doc.id)}>View details</button>
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
                           {doc.publicUrl && (
                             <a className="btn-secondary" href={doc.publicUrl} target="_blank" rel="noreferrer">Open</a>
                           )}
+                          <button className="btn-primary" onClick={() => analyzeDocument(doc.id)} disabled={!!analyzingIds[doc.id]}>
+                            {analyzingIds[doc.id] ? 'Analyzing…' : 'Analyze'}
+                          </button>
                           <button className="btn-ghost" onClick={() => deleteDocument(doc.id)} disabled={!!deletingIds[doc.id]}>
                             {deletingIds[doc.id] ? 'Deleting…' : 'Delete'}
                           </button>
-                          <button className="btn-primary" onClick={() => toast.info('Analyze coming soon')}>Analyze</button>
                         </div>
                       </li>
                     ))}
                   </ul>
+                )}
+                {detailsDocId && scores[detailsDocId] && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" onClick={() => setDetailsDocId('')}>
+                    <div className="card max-w-[860px] w-full max-h-[85vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                      <div className="sticky top-0 bg-card pb-2 mb-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h3 className="mt-0 mb-1 text-xl font-semibold">Detailed analysis</h3>
+                            <div className="text-xs text-muted">Context: {analysisQuery || 'General'}</div>
+                          </div>
+                          <button className="btn-ghost" onClick={() => setDetailsDocId('')}>Close</button>
+                        </div>
+                      </div>
+
+                      <div className="overflow-auto pr-1" style={{ maxHeight: 'calc(85vh - 56px)' }}>
+                        <section className="mb-3">
+                          <div className="font-semibold mb-1">Summary</div>
+                          <p className="m-0 text-sm leading-relaxed">{scores[detailsDocId].rationale || '—'}</p>
+                        </section>
+
+                        <section className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                          <div className="bg-white/3 rounded-lg p-3 border border-white/6">
+                            <div className="font-semibold mb-1">Focus topics</div>
+                            <ul className="list-disc pl-5 m-0 text-sm space-y-1">
+                              {(scores[detailsDocId].focus_topics || []).map((t, i) => (<li key={i}>{t}</li>))}
+                            </ul>
+                          </div>
+                          <div className="bg-white/3 rounded-lg p-3 border border-white/6">
+                            <div className="font-semibold mb-1">Repetitive / low-value</div>
+                            <ul className="list-disc pl-5 m-0 text-sm space-y-1">
+                              {(scores[detailsDocId].repetitive_topics || []).map((t, i) => (<li key={i}>{t}</li>))}
+                            </ul>
+                          </div>
+                        </section>
+
+                        <section>
+                          <div className="font-semibold mb-1">Suggested plan</div>
+                          <ol className="list-decimal pl-5 m-0 text-sm space-y-1">
+                            {(scores[detailsDocId].suggested_plan || []).map((t, i) => (<li key={i}>{t}</li>))}
+                          </ol>
+                        </section>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>

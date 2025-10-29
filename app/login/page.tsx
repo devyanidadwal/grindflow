@@ -17,8 +17,7 @@ export default function LoginPage() {
     async function checkAuth() {
       const { data } = await supabase.auth.getSession()
       if (data?.session) {
-        // Already authenticated, redirect to dashboard
-        router.replace('/')
+        router.replace('/dashboard')
       } else {
         setChecking(false)
       }
@@ -39,7 +38,7 @@ export default function LoginPage() {
       if (error) throw error
 
       toast.success('Logged in successfully!')
-      router.push('/')
+      router.push('/dashboard')
     } catch (error: any) {
       toast.error(error.message || 'Login failed')
     } finally {

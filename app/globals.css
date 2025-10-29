@@ -72,3 +72,25 @@ body {
   opacity: 1;
 }
 
+@keyframes floatSubtle {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-3px); }
+  100% { transform: translateY(0px); }
+}
+
+.float-subtle {
+  animation: floatSubtle 6s ease-in-out infinite;
+}
+
+/* Container Text Flip (Aceternity-style minimalist) */
+@keyframes gfFlip {
+  to {
+    transform: translateY(calc(-1 * (var(--count) - 0) * 100%));
+  }
+}
+
+.text-flip-inner {
+  will-change: transform;
+  animation: gfFlip var(--duration, 6s) steps(var(--count, 2)) infinite;
+}
+

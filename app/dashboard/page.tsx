@@ -4,9 +4,11 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
-import Footer from '@/components/Footer'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
+import SoftCard from '@/components/ui/soft-card'
+import PrettyFlow from '@/components/ui/pretty-flow'
+import { motion } from 'motion/react'
 
 export default function Dashboard() {
   const [activeView, setActiveView] = useState('home')
@@ -14,6 +16,7 @@ export default function Dashboard() {
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
   const [documents, setDocuments] = useState<Array<{ id: string; file_name: string; publicUrl: string | null; storage_path: string; size_bytes: number | null; created_at?: string }>>([])
   const [docsLoading, setDocsLoading] = useState(false)
   const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({})
@@ -34,6 +37,7 @@ export default function Dashboard() {
   const [quizQuestions, setQuizQuestions] = useState<Array<{ question: string; options: string[]; correctIndex: number }>>([])
   const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({})
   const [quizScore, setQuizScore] = useState<number | null>(null)
+  const [showQuizResults, setShowQuizResults] = useState(false)
   // Studyflow states
   const [studyflowSelectedDocId, setStudyflowSelectedDocId] = useState<string>('')
   const [studyflowSelectOpen, setStudyflowSelectOpen] = useState(false)
@@ -387,7 +391,7 @@ export default function Dashboard() {
 
           {activeView === 'home' && (
             <section className="fade visible flex flex-col items-center justify-center gap-[18px] min-h-[80vh]">
-              <div className="card">
+              <SoftCard>
                 <h3 className="mt-0 mb-4 text-xl font-semibold">Upload Document</h3>
                 <div className="mb-3">
                   <span className="block text-sm text-muted mb-2">Select PDF file:</span>
@@ -401,32 +405,70 @@ export default function Dashboard() {
                   />
                   <label
                     htmlFor="file-upload-input"
-                    className="block w-full cursor-pointer border border-white/4 rounded-lg bg-transparent p-4 hover:bg-white/5 transition-colors text-center"
+                    className={`block w-full cursor-pointer border border-dashed rounded-xl p-6 transition-colors text-center select-none ${isDragging ? 'bg-accent/10 border-accent/40' : 'bg-white/3 border-white/6 hover:bg-white/5'}`}
+                    onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={(e) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files?.[0]) setFile(e.dataTransfer.files[0]) }}
                   >
-                    <span className="text-accent font-semibold">Click to choose PDF file</span>
-                    <span className="block text-xs text-muted mt-1">or drag and drop</span>
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white/5 text-accent">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="17 8 12 3 7 8" />
+                          <line x1="12" y1="3" x2="12" y2="15" />
+                        </svg>
+                      </span>
+                      <span className="text-accent font-semibold">Click to choose PDF</span>
+                      <span className="block text-xs text-muted">or drag and drop • PDF up to 20MB</span>
+                      {file && (
+                        <span className="mt-1 inline-flex items-center gap-2 text-[13px] text-eaf0ff bg-white/5 border border-white/10 rounded-full px-3 py-1">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <path d="M14 2v6h6" />
+                          </svg>
+                          {file.name}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); setFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                            className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1"
+                            aria-label="Remove selected file"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      )}
+                    </div>
                   </label>
                 </div>
-                {file && (
-                  <div className="mb-3 p-2 bg-white/5 rounded-lg border border-white/10">
-                    <p className="text-sm text-muted mb-1">Selected file:</p>
-                    <p className="text-sm font-medium">{file.name}</p>
-                    <p className="text-xs text-muted mt-1">Size: {(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                {uploading && (
+                  <div className="mb-3">
+                    <div className="h-1.5 bg-white/5 rounded overflow-hidden">
+                      <div className="h-full bg-accent" style={{ width: '65%' }} />
+                    </div>
+                    <div className="text-xs text-muted mt-2">Uploading… Please keep this tab open.</div>
                   </div>
                 )}
                 <div className="flex gap-2.5">
                   <button onClick={handleUpload} className="btn-primary" disabled={!file || uploading}>{uploading ? 'Uploading…' : 'Upload'}</button>
-                  <button onClick={() => toast.info('Mock analyze feature coming soon')} className="btn-secondary">Mock Analyze</button>
+                  {/* <button onClick={() => toast.info('Mock analyze feature coming soon')} className="btn-secondary">Mock Analyze</button> */}
                 </div>
-              </div>
+              </SoftCard>
             </section>
           )}
 
           {activeView === 'my-docs' && (
             <section className="fade visible flex flex-col items-center justify-start gap-[18px] min-h-[80vh]">
-              <div className="card">
+              <SoftCard>
                 <h3 className="mt-0 mb-4 text-xl font-semibold">My Documents</h3>
-                {docsLoading && <p className="text-muted">Loading…</p>}
+                {docsLoading && (
+                  <div className="space-y-2">
+                    {[0,1,2].map((i) => (
+                      <div key={i} className="h-[58px] rounded-lg overflow-hidden bg-white/5 border border-white/6">
+                        <div className="h-full w-full animate-pulse bg-gradient-to-r from-white/5 via-white/10 to-white/5 bg-[length:200%_100%]" />
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="mb-3">
                   <label className="block text-sm text-muted mb-1">Analysis context (what are you studying?)</label>
                   <input value={analysisQuery} onChange={(e) => setAnalysisQuery(e.target.value)} placeholder="e.g., Midsem exam for MAIT University, Chapters 5-7"
@@ -437,8 +479,14 @@ export default function Dashboard() {
                 )}
                 {!docsLoading && documents.length > 0 && (
                   <ul className="list-none p-0 m-0 space-y-3">
-                    {documents.map((doc) => (
-                      <li key={doc.id} className="flex items-center justify-between border border-white/6 rounded-lg px-3 py-2 bg-white/5">
+                    {documents.map((doc, i) => (
+                      <motion.li
+                        key={doc.id}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.03 }}
+                        className="flex items-center justify-between border border-white/6 rounded-lg px-3 py-2 bg-white/5 transition-transform duration-200 hover:translate-y-[-1px]"
+                      >
                         <div className="min-w-0">
                           <div className="font-medium truncate max-w-[520px]">{doc.file_name}</div>
                           <div className="text-xs text-muted">{(doc.size_bytes ? (doc.size_bytes / 1024 / 1024).toFixed(2) : '—')} MB • {doc.created_at ? new Date(doc.created_at).toLocaleString() : ''}</div>
@@ -453,20 +501,27 @@ export default function Dashboard() {
                           {doc.publicUrl && (
                             <a className="btn-secondary" href={doc.publicUrl} target="_blank" rel="noreferrer">Open</a>
                           )}
-                          <button className="btn-primary" onClick={() => analyzeDocument(doc.id)} disabled={!!analyzingIds[doc.id]}>
-                            {analyzingIds[doc.id] ? 'Analyzing…' : 'Analyze'}
+                          <button className="btn-primary inline-flex items-center gap-2" onClick={() => analyzeDocument(doc.id)} disabled={!!analyzingIds[doc.id]}>
+                            {analyzingIds[doc.id] ? (
+                              <>
+                                <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                                </svg>
+                                Analyzing…
+                              </>
+                            ) : 'Analyze'}
                           </button>
                           <button className="btn-ghost" onClick={() => deleteDocument(doc.id)} disabled={!!deletingIds[doc.id]}>
                             {deletingIds[doc.id] ? 'Deleting…' : 'Delete'}
                           </button>
                         </div>
-                      </li>
+                      </motion.li>
                     ))}
                   </ul>
                 )}
                 {detailsDocId && scores[detailsDocId] && (
                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" onClick={() => setDetailsDocId('')}>
-                    <div className="card max-w-[860px] w-full max-h-[85vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="card max-w-[860px] w-full max-h-[85vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
                       <div className="sticky top-0 bg-card pb-2 mb-2">
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -505,10 +560,10 @@ export default function Dashboard() {
                           </ol>
                         </section>
                       </div>
-                    </div>
+                    </motion.div>
                   </div>
                 )}
-              </div>
+              </SoftCard>
             </section>
           )}
 
@@ -518,26 +573,44 @@ export default function Dashboard() {
 
           {activeView === 'quiz' && (
             <section className="fade visible flex flex-col items-center justify-start gap-[18px] min-h-[80vh] w-full">
-              <div className="card w-full">
-                <h3 className="mt-0 mb-4 text-xl font-semibold">Quiz</h3>
+              <SoftCard className="w-full">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <h3 className="mt-0 mb-0 text-xl font-semibold">Quiz</h3>
+                  {quizSelectedDocId && (
+                    <span className="text-xs text-muted">Source: {documents.find(d => d.id === quizSelectedDocId)?.file_name || quizSelectedDocId}</span>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
                   <div className="md:col-span-1">
                     <button
-                      className="btn-secondary w-full"
+                      className="btn-secondary w-full flex items-center justify-center gap-2"
                       onClick={() => setQuizSelectOpen(true)}
                     >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
                       {quizSelectedDocId ? 'Change PDF' : 'Select PDF'}
                     </button>
+                    {quizSelectedDocId && (
+                      <div className="mt-2 inline-flex items-center gap-2 text-[13px] text-eaf0ff bg-white/5 border border-white/10 rounded-full px-3 py-1">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+                        <span className="truncate max-w-[220px]">{documents.find(d => d.id === quizSelectedDocId)?.file_name || quizSelectedDocId}</span>
+                        <button type="button" onClick={() => setQuizSelectedDocId('')} className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1" aria-label="Clear selected document">×</button>
+                      </div>
+                    )}
                   </div>
                   <div className="md:col-span-2 flex gap-2">
-                    <input
-                      className="input-field flex-1"
-                      placeholder="Enter keywords (e.g., derivatives, chain rule)"
-                      value={quizKeywords}
-                      onChange={(e) => setQuizKeywords(e.target.value)}
-                    />
+                    <div className="relative flex-1">
+                      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+                      </span>
+                      <input
+                        className="input-field pl-8 w-full"
+                        placeholder="Enter keywords (e.g., derivatives, chain rule)"
+                        value={quizKeywords}
+                        onChange={(e) => setQuizKeywords(e.target.value)}
+                      />
+                    </div>
                     <button
-                      className="btn-primary"
+                      className="btn-primary inline-flex items-center gap-2"
                       disabled={!quizSelectedDocId || quizLoading}
                       onClick={async () => {
                         try {
@@ -545,6 +618,7 @@ export default function Dashboard() {
                           setQuizScore(null)
                           setQuizQuestions([])
                           setQuizAnswers({})
+                          setShowQuizResults(false)
                           const { data: sessionData } = await supabase.auth.getSession()
                           const token = sessionData.session?.access_token
                           if (!token) throw new Error('Not authenticated')
@@ -568,70 +642,114 @@ export default function Dashboard() {
                         }
                       }}
                     >
-                      {quizLoading ? 'Generating…' : 'Generate Quiz'}
+                      {quizLoading ? (
+                        <>
+                          <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                          Generating…
+                        </>
+                      ) : 'Generate Quiz'}
                     </button>
                   </div>
                 </div>
 
-                {quizSelectedDocId && (
-                  <div className="mb-3 text-sm text-muted">Selected document: {documents.find(d => d.id === quizSelectedDocId)?.file_name || quizSelectedDocId}</div>
-                )}
-
-                {quizQuestions.length > 0 && (
-                  <div className="space-y-4 overflow-auto pr-1" style={{ maxHeight: 'calc(85vh - 220px)' }}>
-                    {quizQuestions.map((q, idx) => (
-                      <div key={idx} className="bg-transparent rounded-lg p-3 border border-white/6">
-                        <div className="font-medium mb-2">{idx + 1}. {q.question}</div>
+                {quizLoading && quizQuestions.length === 0 && (
+                  <div className="space-y-3">
+                    {[0,1,2,3].map((i) => (
+                      <div key={i} className="rounded-lg p-3 border border-white/6 bg-white/5">
+                        <div className="h-4 w-2/3 mb-2 animate-pulse bg-white/10 rounded" />
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {q.options.map((opt, oi) => (
-                            <label key={oi} className={`cursor-pointer rounded-lg border border-white/6 p-2 flex items-center gap-2 ${quizAnswers[idx] === oi ? 'bg-accent/12' : 'bg-transparent'}`}>
-                              <input
-                                type="radio"
-                                name={`q-${idx}`}
-                                className="accent-current"
-                                checked={quizAnswers[idx] === oi}
-                                onChange={() => setQuizAnswers((s) => ({ ...s, [idx]: oi }))}
-                              />
-                              <span className="text-sm">{opt}</span>
-                            </label>
-                          ))}
+                          {[0,1,2,3].map((j) => (<div key={j} className="h-8 rounded bg-white/10 animate-pulse" />))}
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
 
-                    <div className="flex items-center gap-3">
-                      <button
-                        className="btn-primary"
-                        onClick={() => {
-                          let score = 0
-                          quizQuestions.forEach((q, i) => {
-                            if (quizAnswers[i] === q.correctIndex) score += 1
-                          })
-                          setQuizScore(score)
-                          toast.success(`You scored ${score}/${quizQuestions.length}`)
-                        }}
-                      >
-                        Check Score
-                      </button>
-                      <button
-                        className="btn-ghost"
-                        onClick={() => {
-                          setQuizQuestions([])
-                          setQuizAnswers({})
+                {quizQuestions.length === 0 && !quizLoading && (
+                  <div className="rounded-lg border border-dashed border-white/8 bg-white/3 p-8 text-center text-sm text-muted">Start by selecting a PDF and entering a few keywords. We’ll generate up to 10 questions for quick practice.</div>
+                )}
+
+                {quizQuestions.length > 0 && (
+                  <div className="space-y-4 overflow-auto pr-1" style={{ maxHeight: 'calc(85vh - 260px)' }}>
+                    <div className="sticky top-0 z-10 -mt-1 mb-2 bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/70 rounded-lg border border-white/6 p-3 flex items-center justify-between">
+                      <div className="text-sm text-muted">{quizQuestions.length} questions • select the best answer</div>
+                      <div className="h-1 w-32 rounded bg-white/10 overflow-hidden">
+                        <div className="h-full bg-accent" style={{ width: `${Math.round((Object.keys(quizAnswers).length/quizQuestions.length)*100)}%` }} />
+                      </div>
+                    </div>
+
+                    {quizQuestions.map((q, idx) => (
+                      <SoftCard key={idx} className="!p-4">
+                        <div className="font-medium mb-3 leading-relaxed">{idx + 1}. {q.question}</div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {q.options.map((opt, oi) => {
+                            const checked = quizAnswers[idx] === oi
+                            const isCorrect = q.correctIndex === oi
+                            const show = showQuizResults
+                            return (
+                              <label
+                                key={oi}
+                                className={`cursor-pointer rounded-lg border p-3 flex items-center gap-2 transition-colors ${
+                                  show
+                                    ? (isCorrect
+                                        ? 'border-emerald-400/40 bg-emerald-500/10'
+                                        : (checked ? 'border-red-400/40 bg-red-500/10' : 'border-white/6 bg-white/3'))
+                                    : (checked ? 'border-accent/40 bg-accent/10' : 'border-white/6 bg-white/3 hover:bg-white/5')
+                                }`}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`q-${idx}`}
+                                  className="sr-only"
+                                  checked={checked}
+                                  onChange={() => setQuizAnswers((s) => ({ ...s, [idx]: oi }))}
+                                />
+                                <span className={`inline-flex h-4 w-4 rounded-full border ${
+                                  show ? (isCorrect ? 'bg-emerald-400 border-emerald-400' : (checked ? 'bg-red-400 border-red-400' : 'border-white/20')) : (checked ? 'bg-accent border-accent' : 'border-white/20')
+                                }`} />
+                                <span className="text-sm">{opt}</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </SoftCard>
+                    ))}
+
+                    <div className="sticky bottom-0 z-10 bg-gradient-to-t from-card to-transparent pt-4">
+                      <div className="flex items-center gap-3">
+                        <button
+                          className="btn-primary"
+                          onClick={() => {
+                            let score = 0
+                            quizQuestions.forEach((q, i) => { if (quizAnswers[i] === q.correctIndex) score += 1 })
+                            setQuizScore(score)
+                            setShowQuizResults(true)
+                            toast.success(`You scored ${score}/${quizQuestions.length}`)
+                          }}
+                        >
+                          Check Score
+                        </button>
+                        <button
+                          className="btn-ghost"
+                          onClick={() => {
+                            setQuizQuestions([])
+                            setQuizAnswers({})
                           setQuizScore(null)
-                          setQuizKeywords('')
-                          setQuizSelectedDocId('')
-                        }}
-                      >
-                        Exit
-                      </button>
-                      {quizScore != null && (
-                        <div className="text-sm">Score: <span className="font-semibold">{quizScore}/{quizQuestions.length}</span></div>
-                      )}
+                          setShowQuizResults(false)
+                            setQuizKeywords('')
+                            setQuizSelectedDocId('')
+                          }}
+                        >
+                          Exit
+                        </button>
+                        {quizScore != null && (
+                          <div className="text-sm">Score: <span className="font-semibold">{quizScore}/{quizQuestions.length}</span></div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
-              </div>
+              </SoftCard>
 
               {quizSelectOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" onClick={() => setQuizSelectOpen(false)}>
@@ -679,22 +797,34 @@ export default function Dashboard() {
 
           {activeView === 'studyflow' && (
             <section className="fade visible flex flex-col items-center justify-start gap-[18px] min-h-[80vh] w-full">
-              <div className="card w-full flex flex-col" style={{ height: 'calc(100vh - 180px)' }}>
+              <SoftCard className="w-full flex flex-col" style={{ height: 'calc(100vh - 180px)' } as any}>
                 <div className="flex-shrink-0 mb-4">
-                  <h3 className="mt-0 mb-4 text-xl font-semibold">Studyflow</h3>
-                  <div className="flex gap-3 items-center">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <h3 className="mt-0 mb-0 text-xl font-semibold">Studyflow</h3>
+                    {studyflowSelectedDocId && (
+                      <span className="text-xs text-muted">Source: {documents.find(d => d.id === studyflowSelectedDocId)?.file_name || studyflowSelectedDocId}</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-3 items-center">
                     <button
-                      className="btn-secondary"
+                      className="btn-secondary inline-flex items-center gap-2"
                       onClick={() => setStudyflowSelectOpen(true)}
                     >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
                       {studyflowSelectedDocId ? 'Change PDF' : 'Select PDF'}
                     </button>
                     {studyflowSelectedDocId && (
-                      <>
-                        <button
-                          className="btn-primary"
-                          disabled={studyflowLoading}
-                          onClick={async () => {
+                      <span className="inline-flex items-center gap-2 text-[13px] text-eaf0ff bg-white/5 border border-white/10 rounded-full px-3 py-1">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+                        <span className="truncate max-w-[260px]">{documents.find(d => d.id === studyflowSelectedDocId)?.file_name || studyflowSelectedDocId}</span>
+                        <button type="button" onClick={() => setStudyflowSelectedDocId('')} className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1" aria-label="Clear selected document">×</button>
+                      </span>
+                    )}
+                    {studyflowSelectedDocId && (
+                      <button
+                        className="btn-primary inline-flex items-center gap-2"
+                        disabled={studyflowLoading}
+                        onClick={async () => {
                             try {
                               setStudyflowLoading(true)
                               setStudyflowDiagram('')
@@ -726,9 +856,13 @@ export default function Dashboard() {
                             }
                           }}
                         >
-                          {studyflowLoading ? 'Generating…' : 'Generate Flow Analysis'}
+                          {studyflowLoading ? (
+                            <>
+                              <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                              Generating…
+                            </>
+                          ) : 'Generate Flow'}
                         </button>
-                      </>
                     )}
                   </div>
                   {studyflowSelectedDocId && (
@@ -736,18 +870,22 @@ export default function Dashboard() {
                   )}
                 </div>
 
+                {(!studyflowAnalysis && !studyflowDiagram) && (
+                  <div className="rounded-lg border border-dashed border-white/8 bg-white/3 p-8 text-center text-sm text-muted">Select a PDF and generate a flow to visualize the study path. You can optionally add a detailed analysis after that.</div>
+                )}
+
                 {(studyflowAnalysis || studyflowDiagram) && (
                   <div className="flex-1 overflow-auto pr-1 space-y-6" style={{ maxHeight: 'calc(100vh - 280px)' }}>
                     {studyflowDiagram && (
-                      <div>
+                      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
                         <h4 className="mb-3 text-lg font-semibold">Flow Diagram</h4>
-                        <div className="bg-transparent rounded-lg p-4 border border-white/6">
-                          <pre className="whitespace-pre-wrap text-sm leading-relaxed font-mono">{studyflowDiagram}</pre>
-                        </div>
+                        <SoftCard className="!p-0">
+                          <PrettyFlow content={studyflowDiagram} />
+                        </SoftCard>
                         {studyflowDiagram && !studyflowAnalysis && (
                           <div className="mt-3">
                             <button
-                              className="btn-secondary"
+                              className="btn-secondary inline-flex items-center gap-2"
                               disabled={studyflowAnalysisLoading}
                               onClick={async () => {
                                 try {
@@ -779,24 +917,32 @@ export default function Dashboard() {
                                 }
                               }}
                             >
-                              {studyflowAnalysisLoading ? 'Generating Analysis…' : 'DETAILED FLOW STATE ANALYSIS'}
+                              {studyflowAnalysisLoading ? (
+                                <>
+                                  <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                                  Generating Analysis…
+                                </>
+                              ) : 'Generate Detailed Analysis'}
                             </button>
                           </div>
                         )}
-                      </div>
+                      </motion.div>
                     )}
 
                     {studyflowAnalysis && (
-                      <div>
+                      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
                         <h4 className="mb-3 text-lg font-semibold">Flow State Analysis</h4>
-                        <div className="bg-transparent rounded-lg p-4 border border-white/6">
+                        <SoftCard className="!p-4">
+                          <div className="flex items-center justify-end mb-2">
+                            <button className="btn-ghost text-xs" onClick={() => { navigator.clipboard.writeText(studyflowAnalysis) ; toast.success('Copied analysis') }}>Copy</button>
+                          </div>
                           <pre className="whitespace-pre-wrap text-sm leading-relaxed font-sans">{studyflowAnalysis}</pre>
-                        </div>
-                      </div>
+                        </SoftCard>
+                      </motion.div>
                     )}
                   </div>
                 )}
-              </div>
+              </SoftCard>
 
               {studyflowSelectOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" onClick={() => setStudyflowSelectOpen(false)}>
@@ -872,7 +1018,7 @@ export default function Dashboard() {
             </section>
           )}
         </main>
-        <Footer />
+        {/* Footer removed as requested */}
       </div>
     </div>
   )

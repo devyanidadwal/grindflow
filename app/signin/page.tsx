@@ -17,8 +17,7 @@ export default function SignInPage() {
     async function checkAuth() {
       const { data } = await supabase.auth.getSession()
       if (data?.session) {
-        // Already authenticated, redirect to dashboard
-        router.push('/')
+        router.push('/dashboard')
       }
       setChecking(false)
     }
@@ -38,7 +37,7 @@ export default function SignInPage() {
       if (error) throw error
 
       toast.success('Account created! Please check your email to confirm (if required).')
-      router.push('/')
+      router.push('/dashboard')
     } catch (error: any) {
       toast.error(error.message || 'Sign up failed')
     } finally {

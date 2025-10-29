@@ -10,8 +10,8 @@ const poppins = Poppins({
 })
 
 export const metadata: Metadata = {
-  title: 'GrindFlow — Dashboard',
-  description: 'Peer-powered study notes',
+  title: 'GrindFlow — Make your notes 10x better',
+  description: 'Minimalist study workflows, AI scoring, and quizzes.',
 }
 
 export default function RootLayout({

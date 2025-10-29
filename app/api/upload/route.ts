@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+// Simple in-memory cache to avoid bucket metadata calls on every upload
+let BUCKET_READY = false
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
@@ -23,7 +26,7 @@ export async function POST(request: NextRequest) {
     })
     console.log('[API] Supabase client initialized')
 
-    // Verify user authentication if token provided
+    // Verify user authentication; require token to associate uploads
     if (token) {
       console.log('[API] Step 3: Verifying user token...')
       const authStartTime = Date.now()
@@ -82,6 +85,24 @@ export async function POST(request: NextRequest) {
 
     // Upload to Supabase Storage
     const bucketName = process.env.SUPABASE_STORAGE_BUCKET || 'documents'
+    // Ensure bucket exists (creates a public bucket if missing)
+    if (!BUCKET_READY) {
+      try {
+        const { data: buckets } = await supabase.storage.listBuckets()
+        const bucket = (buckets || []).find((b) => b.name === bucketName)
+        if (!bucket) {
+          await supabase.storage.createBucket(bucketName, {
+            public: true,
+            fileSizeLimit: 52428800,
+          })
+        } else if (!bucket.public) {
+          await supabase.storage.updateBucket(bucketName, { public: true })
+        }
+        BUCKET_READY = true
+      } catch (e) {
+        console.warn('[API] bucket ensure failed (continuing):', (e as any)?.message || e)
+      }
+    }
     const fileName = `${Date.now()}-${file.name}`
     console.log('[API] Step 7: Uploading to Supabase Storage...')
     console.log('[API] Bucket:', bucketName)
@@ -119,6 +140,42 @@ export async function POST(request: NextRequest) {
     const totalDuration = Date.now() - startTime
     console.log('[API] Total request processing time:', totalDuration, 'ms')
 
+    // Persist metadata to database if we have an authenticated user
+    let dbInsertError: any = null
+    let inserted: any = null
+    try {
+      if (token) {
+        const { data: { user } } = await supabase.auth.getUser(token)
+        if (user) {
+          // Ensure a user_profiles row exists to satisfy FK (username required)
+          try {
+            const fallbackUsername = user.email || `user-${user.id.substring(0, 8)}`
+            await supabase
+              .from('user_profiles')
+              .upsert({ id: user.id, username: fallbackUsername }, { onConflict: 'id' })
+          } catch (e) {
+            console.warn('[API] upsert user_profiles failed (continuing):', (e as any)?.message || e)
+          }
+          const { data: rows, error: insErr } = await supabase
+            .from('documents')
+            .insert({
+              user_id: user.id,
+              file_name: file.name,
+              storage_path: uploadData.path,
+            })
+            .select('id')
+          if (insErr) {
+            dbInsertError = insErr
+          } else {
+            inserted = rows?.[0] || null
+          }
+        }
+      }
+    } catch (e: any) {
+      dbInsertError = e
+      console.error('[API] Failed to insert metadata into documents table:', e?.message || e)
+    }
+
     const response = {
       success: true,
       message: 'File uploaded successfully',
@@ -133,6 +190,7 @@ export async function POST(request: NextRequest) {
         totalMs: totalDuration,
         uploadMs: uploadDuration,
       },
+      db: dbInsertError ? { warning: 'metadata_not_saved', message: dbInsertError?.message || String(dbInsertError) } : { inserted: true, row: inserted },
     }
 
     console.log('[API] Sending success response:', JSON.stringify(response, null, 2))

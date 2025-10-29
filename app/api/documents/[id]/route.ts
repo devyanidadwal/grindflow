@@ -4,9 +4,13 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
-export async function DELETE(request: NextRequest, context: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   // Prefer path param; fall back to query (?id=) or JSON body
-  let documentId = context?.params?.id
+  let documentId = ''
+  try {
+    const p = await context.params
+    documentId = p?.id || ''
+  } catch {}
   if (!documentId) {
     try {
       const url = new URL(request.url)

@@ -9,21 +9,26 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "^2.77.0",
     "@tailwindcss/postcss": "^4.1.16",
     "@types/node": "^24.9.2",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "autoprefixer": "^10.4.21",
+    "clsx": "^2.1.1",
+    "motion": "^11.15.0",
     "next": "^16.0.1",
+    "pdf-parse": "^1.1.1",
     "postcss": "^8.5.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "motion": "^11.15.0",
-    "@google/generative-ai": "^0.21.0",
-    "pdf-parse": "^1.1.1",
     "sonner": "^2.0.7",
+    "tailwind-merge": "^3.3.1",
     "tailwindcss": "^4.1.16",
     "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/pdf-parse": "^1.1.5"
   }
 }

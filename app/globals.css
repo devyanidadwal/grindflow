@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0f1724;
+  --color-card: #0b1220;
+  --color-muted: #9aa4b2;
+  --color-accent: #6c8cff;
+  --color-eaf0ff: #eaf0ff;
+  --color-glass: rgba(255, 255, 255, 0.04);
+  --radius: 14px;
+  --max-width: 1100px;
+}
+
+:root {
+  --bg: #0f1724;
+  --card: #0b1220;
+  --muted: #9aa4b2;
+  --accent: #6c8cff;
+  --glass: rgba(255, 255, 255, 0.04);
+  --radius: 14px;
+  --max-width: 1100px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Poppins', sans-serif;
+  background: radial-gradient(1200px 600px at 10% 10%, rgba(108, 140, 255, 0.08), transparent),
+    linear-gradient(180deg, #071029, #071129 60%);
+  color: #eaf0ff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-accent border-none px-4 py-2.5 rounded-[10px] text-[#071129] font-bold cursor-pointer hover:opacity-90 transition-opacity;
+  }
+
+  .btn-secondary {
+    @apply bg-transparent border border-white/6 px-3 py-2.5 rounded-[10px] text-muted cursor-pointer hover:bg-white/5 transition-colors;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent border border-white/4 px-2 py-2 rounded-lg text-muted cursor-pointer hover:bg-white/5 transition-colors;
+  }
+
+  .card {
+    @apply bg-card p-[18px] rounded-xl shadow-lg w-full;
+    box-shadow: 0 6px 20px rgba(2, 6, 23, 0.6);
+  }
+
+  .input-field {
+    @apply px-3 py-2 rounded-[10px] border border-white/4 bg-transparent text-eaf0ff placeholder-muted focus:outline-none focus:border-accent/50;
+  }
+}
+
+.fade {
+  opacity: 0;
+  transition: opacity 0.4s ease-in-out;
+}
+
+.fade.visible {
+  opacity: 1;
+}
+

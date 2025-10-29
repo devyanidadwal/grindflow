@@ -15,14 +15,21 @@ export default function LoginPage() {
 
   useEffect(() => {
     async function checkAuth() {
-      const { data } = await supabase.auth.getSession()
-      if (data?.session) {
-        router.replace('/dashboard')
-      } else {
+      try {
+        const { data } = await supabase.auth.getSession()
+        if (data?.session) {
+          router.replace('/dashboard')
+        } else {
+          setChecking(false)
+        }
+      } catch (e) {
+        // swallow and show login form
         setChecking(false)
       }
     }
     checkAuth()
+    const timeout = setTimeout(() => setChecking(false), 4000)
+    return () => clearTimeout(timeout)
   }, [router])
 
   const handleLogin = async (e: React.FormEvent) => {

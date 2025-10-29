@@ -36,7 +36,8 @@ export default function Sidebar({ activeView, onViewChange, username = 'Devyani'
   const navItems = [
     { id: 'home', label: 'Home' },
     { id: 'my-docs', label: 'My Documents' },
-    { id: 'qsui', label: 'Quiz / Study Flow' },
+    { id: 'quiz', label: 'Quiz' },
+    { id: 'studyflow', label: 'Studyflow' },
     { id: 'wallet', label: 'Wallet' },
     { id: 'wallet-transactions', label: 'Wallet Transactions' },
     { id: 'settings', label: 'Settings' },

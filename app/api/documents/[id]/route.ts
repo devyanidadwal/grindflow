@@ -46,6 +46,7 @@ export async function DELETE(request: NextRequest, context: { params: { id: stri
 
     // Delete from storage first (ignore if missing)
     const { error: remErr } = await supabase.storage.from(bucketName).remove([storagePath])
+    const removedFromStorage = !remErr
     if (remErr) {
       // continue; maybe file already gone
       console.warn('[DELETE] storage remove warning:', remErr.message)
@@ -59,7 +60,7 @@ export async function DELETE(request: NextRequest, context: { params: { id: stri
 
     if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 })
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, removedFromStorage })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }

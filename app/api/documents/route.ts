@@ -62,7 +62,11 @@ export async function GET(request: NextRequest) {
       })
     )
 
-    return NextResponse.json({ rows: rowsWithUrls })
+    const res = NextResponse.json({ rows: rowsWithUrls })
+    res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    res.headers.set('Pragma', 'no-cache')
+    res.headers.set('Expires', '0')
+    return res
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }

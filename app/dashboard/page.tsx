@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import SoftCard from '@/components/ui/soft-card'
 import PrettyFlow from '@/components/ui/pretty-flow'
 import { motion } from 'motion/react'
+import ModalPortal from '@/components/ui/modal-portal'
 
 export default function Dashboard() {
   const [activeView, setActiveView] = useState('home')
@@ -520,8 +521,9 @@ export default function Dashboard() {
                   </ul>
                 )}
                 {detailsDocId && scores[detailsDocId] && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" onClick={() => setDetailsDocId('')}>
-                    <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="card max-w-[860px] w-full max-h-[85vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                  <ModalPortal>
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" onClick={() => setDetailsDocId('')}>
+                      <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="card w-full max-w-[900px] mx-auto max-h-[85vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
                       <div className="sticky top-0 bg-card pb-2 mb-2">
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -560,8 +562,9 @@ export default function Dashboard() {
                           </ol>
                         </section>
                       </div>
-                    </motion.div>
-                  </div>
+                      </motion.div>
+                    </div>
+                  </ModalPortal>
                 )}
               </SoftCard>
             </section>

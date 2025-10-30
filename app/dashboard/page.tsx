@@ -74,7 +74,7 @@ export default function Dashboard() {
         if (redirectTimeout) {
           clearTimeout(redirectTimeout)
         }
-        router.replace('/login')
+        router.replace('/')
       } else if (session) {
         const email = session.user.email || 'User'
         setIsAuthenticated(true)
@@ -103,7 +103,7 @@ export default function Dashboard() {
             await supabase.auth.signOut()
             setIsAuthenticated(false)
             setIsLoading(false)
-            router.replace('/login')
+            router.replace('/')
             return
           }
         }
@@ -130,7 +130,7 @@ export default function Dashboard() {
             setIsLoading(false)
             redirectTimeout = setTimeout(() => {
               if (mounted) {
-                router.replace('/login')
+                router.replace('/')
               }
             }, 1500)
           }
@@ -159,40 +159,31 @@ export default function Dashboard() {
     }
   }, [router])
 
-  const handleSignIn = async () => {
+  // Email/password sign-in removed in favor of Google OAuth
+
+  const handleGoogleSignIn = async () => {
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: authEmail,
-        password: authPassword,
+      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : undefined
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo },
       })
       if (error) throw error
-      toast.success('Signed in')
-      setShowAuth(false)
+      // For OAuth, Supabase will redirect; as a guard, show a toast
+      toast.info('Redirecting to Google…')
     } catch (e: any) {
-      toast.error(`Sign-in failed: ${e.message || e}`)
+      toast.error(`Google sign-in failed: ${e.message || e}`)
     }
   }
 
-  const handleSignUp = async () => {
-    try {
-      const { error } = await supabase.auth.signUp({
-        email: authEmail,
-        password: authPassword,
-      })
-      if (error) throw error
-      toast.success('Sign-up successful. Check your email to confirm (if required).')
-      setShowAuth(false)
-    } catch (e: any) {
-      toast.error(`Sign-up failed: ${e.message || e}`)
-    }
-  }
+  // Email/password sign-up removed
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     setUserEmail('')
     setAuthStatus('Not signed in')
     toast.success('Signed out')
-    router.replace('/login')
+    router.replace('/')
   }
 
   const handleUpload = async () => {
@@ -261,7 +252,11 @@ export default function Dashboard() {
       setDocuments([])
       const { data: sessionData } = await supabase.auth.getSession()
       const token = sessionData.session?.access_token
-      if (!token) return
+      if (!token) {
+        // Avoid getting stuck on Loading… if token is missing
+        setDocsLoading(false)
+        return
+      }
       const res = await fetch(`/api/documents?t=${Date.now()}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' as RequestCache })
       if (!res.ok) {
         const text = await res.text()
@@ -379,30 +374,17 @@ export default function Dashboard() {
           {(activeView === 'auth' || showAuth) && (
             <section className="fade visible flex flex-col items-center justify-center gap-[18px] min-h-[80vh]">
               <div className="card">
-                <h3 className="mt-0 mb-4 text-xl font-semibold">Sign in to GrindFlow</h3>
+                <h3 className="mt-0 mb-4 text-xl font-semibold">Continue with Google</h3>
                 <p className="mb-2 text-sm">{authStatus}</p>
-                <div className="flex gap-2 items-center">
-                  <input
-                    type="email"
-                    placeholder="Email"
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    className="input-field flex-1"
-                  />
-                  <input
-                    type="password"
-                    placeholder="Password"
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    className="input-field flex-1"
-                  />
+                <div className="mt-1">
+                  <button onClick={handleGoogleSignIn} className="btn-secondary inline-flex items-center gap-2">
+                    <svg width="16" height="16" viewBox="0 0 533.5 544.3" aria-hidden="true"><path fill="#4285F4" d="M533.5 278.4c0-18.6-1.7-37-5.2-54.8H272.1v103.8h147c-6.3 34.1-25.4 63-54.2 82.3v68h87.5c51.2-47.2 81.1-116.8 81.1-199.3z"/><path fill="#34A853" d="M272.1 544.3c73.4 0 135.3-24.3 180.4-66.1l-87.5-68c-24.3 16.3-55.3 26.1-92.9 26.1-71.3 0-131.8-48-153.5-112.4H28.7v70.7C73.3 486.4 166.5 544.3 272.1 544.3z"/><path fill="#FBBC05" d="M118.6 323.9c-10.8-31.9-10.8-66.4 0-98.3V154.9H28.7c-38.3 76.3-38.3 167.8 0 244.1l89.9-75.1z"/><path fill="#EA4335" d="M272.1 106.6c39.8-.6 78.1 14.3 107.1 41.9l79.8-79.8C404.9 25.2 340.6-.2 272.1 0 166.5 0 73.3 57.9 28.7 154.9l89.9 70.7c21.7-64.5 82.2-112.4 153.5-119z"/></svg>
+                    Continue with Google
+                  </button>
                 </div>
-                <div className="flex gap-2 mt-2">
-                  <button onClick={handleSignIn} className="btn-primary">Sign In</button>
-                  <button onClick={handleSignUp} className="btn-secondary">Sign Up</button>
+                <div className="mt-3">
                   <button onClick={handleSignOut} className="btn-ghost">Sign Out</button>
                 </div>
-                <small className="text-xs text-muted">Use email/password accounts enabled in your Supabase project.</small>
               </div>
             </section>
           )}
@@ -642,11 +624,16 @@ export default function Dashboard() {
                           const { data: sessionData } = await supabase.auth.getSession()
                           const token = sessionData.session?.access_token
                           if (!token) throw new Error('Not authenticated')
+                          const controller = new AbortController()
+                          const QUIZ_TIMEOUT_MS = 20000
+                          const t = setTimeout(() => controller.abort(), QUIZ_TIMEOUT_MS)
                           const res = await fetch('/api/quiz', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                             body: JSON.stringify({ id: quizSelectedDocId, keyword: quizKeywords }),
+                            signal: controller.signal,
                           })
+                          clearTimeout(t)
                           if (!res.ok) {
                             const t = await res.text()
                             throw new Error(t || 'Failed to generate quiz')
@@ -656,7 +643,11 @@ export default function Dashboard() {
                           setQuizQuestions(qs)
                           if (qs.length === 0) toast.info('No questions generated. Try different keywords.')
                         } catch (err: any) {
-                          toast.error(err?.message || 'Quiz generation failed')
+                          if (err?.name === 'AbortError') {
+                            toast.error('Quiz generation timed out. Please try again or add keywords.')
+                          } else {
+                            toast.error(err?.message || 'Quiz generation failed')
+                          }
                         } finally {
                           setQuizLoading(false)
                         }

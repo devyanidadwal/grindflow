@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import pdfParse from 'pdf-parse'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { normalizeForPrompt, buildShortText } from '@/lib/text'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -37,18 +38,47 @@ export async function POST(req: NextRequest) {
     if (selErr || !doc) return NextResponse.json({ error: selErr?.message || 'Not found' }, { status: 404 })
     if (doc.user_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    // Download file bytes from storage
-    const { data: fileData, error: dlErr } = await supabase.storage.from(bucketName).download(doc.storage_path)
-    if (dlErr || !fileData) return NextResponse.json({ error: dlErr?.message || 'Download failed' }, { status: 500 })
+    // Load cached text if present; else parse and cache
+    let text = ''
+    let shortText = ''
+    try {
+      const { data: cached } = await supabase
+        .from('documents_text')
+        .select('text, normalized_text, short_text')
+        .eq('document_id', doc.id)
+        .single()
+      if (cached?.short_text) shortText = cached.short_text
+      if (cached?.text) text = cached.text
+      if (!shortText && cached?.normalized_text) shortText = buildShortText(cached.normalized_text, 12000)
+    } catch {}
 
-    const arrayBuffer = await fileData.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-    const parsed = await pdfParse(buffer)
-    let text = parsed.text || ''
+    if (!text) {
+      const { data: fileData, error: dlErr } = await supabase.storage.from(bucketName).download(doc.storage_path)
+      if (dlErr || !fileData) return NextResponse.json({ error: dlErr?.message || 'Download failed' }, { status: 500 })
 
-    // Keep prompt within token limits
+      const arrayBuffer = await fileData.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
+      const parsed = await pdfParse(buffer)
+      text = parsed.text || ''
+      try {
+        const normalized = normalizeForPrompt(text)
+        shortText = buildShortText(normalized, 12000)
+        await supabase
+          .from('documents_text')
+          .upsert({ document_id: doc.id, text, normalized_text: normalized, short_text: shortText, extracted_at: new Date().toISOString() }, { onConflict: 'document_id' })
+      } catch {}
+    }
+
+    if (!shortText && text) {
+      const normalized = normalizeForPrompt(text)
+      shortText = buildShortText(normalized, 12000)
+      try { await supabase.from('documents_text').update({ normalized_text: normalized, short_text: shortText }).eq('document_id', doc.id) } catch {}
+    }
+
+    // Keep prompt within token limits (prefer short cached text)
+    let promptText = shortText || text
     const maxChars = 18000
-    if (text.length > maxChars) text = text.slice(0, maxChars) + '\n... [truncated]'
+    if (promptText.length > maxChars) promptText = promptText.slice(0, maxChars) + '\n... [truncated]'
 
     if (!geminiApiKey) {
       return NextResponse.json({ error: 'Gemini API key missing on server' }, { status: 500 })
@@ -69,7 +99,7 @@ Return STRICT JSON with keys only:
   "suggested_plan": string[]         // 4-7 bullet steps to improve the notes for the purpose
 }`
 
-    const prompt = `User purpose/context: "${context || 'General study'}"\nDocument: ${doc.file_name}\n--- Begin Extracted Text (truncated) ---\n${text}\n--- End Extracted Text ---\nRespond with JSON only.`
+    const prompt = `User purpose/context: "${context || 'General study'}"\nDocument: ${doc.file_name}\n--- Begin Extracted Text (truncated) ---\n${promptText}\n--- End Extracted Text ---\nRespond with JSON only.`
 
     let output = ''
     try {

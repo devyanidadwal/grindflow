@@ -1,6 +1,20 @@
+"use client"
+
 import { ContainerTextFlip } from '@/components/ui/container-text-flip'
+import { supabase } from '@/lib/supabase'
+import { toast } from 'sonner'
 import SoftCard from '@/components/ui/soft-card'
 export default function Landing() {
+  async function signInWithGoogle() {
+    try {
+      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : undefined
+      const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } })
+      if (error) throw error
+    } catch (e: any) {
+      toast.error(e?.message || 'Google sign-in failed')
+    }
+  }
+
   return (
     <main className="relative min-h-screen flex items-center">
       {/* Subtle decorative background accents */}
@@ -34,8 +48,10 @@ export default function Landing() {
         </p>
 
         <div className="mt-8 flex flex-wrap gap-3">
-          <a href="/login" className="btn-primary">Get started</a>
-          <a href="/signin" className="btn-secondary">Create account</a>
+          <button onClick={signInWithGoogle} className="btn-primary inline-flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 533.5 544.3" aria-hidden="true"><path fill="#4285F4" d="M533.5 278.4c0-18.6-1.7-37-5.2-54.8H272.1v103.8h147c-6.3 34.1-25.4 63-54.2 82.3v68h87.5c51.2-47.2 81.1-116.8 81.1-199.3z"/><path fill="#34A853" d="M272.1 544.3c73.4 0 135.3-24.3 180.4-66.1l-87.5-68c-24.3 16.3-55.3 26.1-92.9 26.1-71.3 0-131.8-48-153.5-112.4H28.7v70.7C73.3 486.4 166.5 544.3 272.1 544.3z"/><path fill="#FBBC05" d="M118.6 323.9c-10.8-31.9-10.8-66.4 0-98.3V154.9H28.7c-38.3 76.3-38.3 167.8 0 244.1l89.9-75.1z"/><path fill="#EA4335" d="M272.1 106.6c39.8-.6 78.1 14.3 107.1 41.9l79.8-79.8C404.9 25.2 340.6-.2 272.1 0 166.5 0 73.3 57.9 28.7 154.9l89.9 70.7c21.7-64.5 82.2-112.4 153.5-119z"/></svg>
+            Continue with Google
+          </button>
         </div>
 
         <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-3">

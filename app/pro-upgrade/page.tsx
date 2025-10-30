@@ -10,41 +10,43 @@ import PaymentModal from '@/components/PaymentModal'
 
 export default function ProUpgradePage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
   const [userEmail, setUserEmail] = useState('')
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<{ name: string; price: number } | null>(null)
   const router = useRouter()
 
   useEffect(() => {
+    let mounted = true
     async function checkAuth() {
       try {
         const { data, error } = await supabase.auth.getSession()
-        
-        // Handle refresh token errors
+        if (!mounted) return
         if (error && (error.message?.includes('refresh') || error.message?.includes('Refresh Token'))) {
           console.log('[PRO-UPGRADE] Invalid refresh token, clearing session')
           await supabase.auth.signOut()
-          router.replace('/login')
-          setIsLoading(false)
+          setIsAuthenticated(false)
           return
         }
-        
         if (data?.session) {
           setIsAuthenticated(true)
           setUserEmail(data.session.user?.email || '')
         } else {
-          router.replace('/login')
+          // Do not redirect; allow viewing page with limited actions
+          setIsAuthenticated(false)
         }
-        setIsLoading(false)
       } catch (e) {
         console.error('[PRO-UPGRADE] Auth check error:', e)
-        await supabase.auth.signOut()
-        router.replace('/login')
-        setIsLoading(false)
+        setIsAuthenticated(false)
       }
     }
     checkAuth()
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (!mounted) return
+      setIsAuthenticated(!!session)
+      setUserEmail(session?.user?.email || '')
+    })
+    return () => { mounted = false; subscription.unsubscribe() }
   }, [router])
 
   const handleSubscribe = (plan: string, price: number) => {
@@ -52,19 +54,7 @@ export default function ProUpgradePage() {
     setShowPaymentModal(true)
   }
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-xl font-semibold mb-2">Loading...</div>
-        </div>
-      </div>
-    )
-  }
-
-  if (!isAuthenticated) {
-    return null
-  }
+  // If not authenticated, show page with a prompt to sign in before subscribing
 
   const plans = [
     {
@@ -128,11 +118,43 @@ export default function ProUpgradePage() {
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar activeView="pro-upgrade" onViewChange={() => {}} username={userEmail || 'User'} />
+      <Sidebar
+        activeView="pro-upgrade"
+        onViewChange={(view) => {
+          // Navigate back to dashboard when user clicks any other view in sidebar
+          // Optionally preserve the intended view via query param
+          try {
+            const target = view && view !== 'home' ? `/dashboard?view=${encodeURIComponent(view)}` : '/dashboard'
+            router.push(target)
+          } catch {
+            router.push('/dashboard')
+          }
+        }}
+        username={userEmail || 'User'}
+      />
       <div className="flex-1 flex flex-col bg-gradient-to-b from-[#0f1724] to-[#071029]">
         <Header title="Pro Upgrade" isAuthenticated={isAuthenticated} userEmail={userEmail} />
         <main className="py-10 px-4">
       <div className="max-w-7xl mx-auto">
+        {!isAuthenticated && (
+          <div className="mb-6 p-4 rounded-lg border border-white/10 bg-white/5 text-sm flex items-center justify-between">
+            <span>Sign in to purchase a plan and manage your subscription.</span>
+            <button
+              onClick={async () => {
+                try {
+                  const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/pro-upgrade` : undefined
+                  const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } })
+                  if (error) throw error
+                } catch (e: any) {
+                  toast.error(e?.message || 'Google sign-in failed')
+                }
+              }}
+              className="btn-primary"
+            >
+              Continue with Google
+            </button>
+          </div>
+        )}
         {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl md:text-5xl font-bold mb-4 bg-gradient-to-r from-accent to-[#9ad4ff] bg-clip-text text-transparent">

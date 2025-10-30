@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import pdfParse from 'pdf-parse'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { normalizeForPrompt, buildShortText } from '@/lib/text'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -39,17 +40,43 @@ export async function POST(req: NextRequest) {
     if (selErr || !doc) return NextResponse.json({ error: selErr?.message || 'Not found' }, { status: 404 })
     if (doc.user_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const { data: fileData, error: dlErr } = await supabase.storage.from(bucketName).download(doc.storage_path)
-    if (dlErr || !fileData) return NextResponse.json({ error: dlErr?.message || 'Download failed' }, { status: 500 })
+    // Load cached text if available; else parse and cache
+    let text = ''
+    let shortText = ''
+    try {
+      const { data: cached } = await supabase
+        .from('documents_text')
+        .select('text, normalized_text, short_text')
+        .eq('document_id', doc.id)
+        .single()
+      if (cached?.short_text) shortText = cached.short_text
+      if (cached?.text) text = cached.text
+      if (!shortText && cached?.normalized_text) shortText = buildShortText(cached.normalized_text, 12000)
+    } catch {}
 
-    const arrayBuffer = await fileData.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-    const parsed = await pdfParse(buffer)
-    let text = parsed.text || ''
+    if (!text) {
+      const { data: fileData, error: dlErr } = await supabase.storage.from(bucketName).download(doc.storage_path)
+      if (dlErr || !fileData) return NextResponse.json({ error: dlErr?.message || 'Download failed' }, { status: 500 })
 
-    // Keep more text for flow analysis
-    const maxChars = 25000
-    if (text.length > maxChars) text = text.slice(0, maxChars) + '\n... [truncated]'
+      const arrayBuffer = await fileData.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
+      const parsed = await pdfParse(buffer)
+      text = parsed.text || ''
+
+      try {
+        const normalized = normalizeForPrompt(text)
+        shortText = buildShortText(normalized, 12000)
+        await supabase
+          .from('documents_text')
+          .upsert({ document_id: doc.id, text, normalized_text: normalized, short_text: shortText, extracted_at: new Date().toISOString() }, { onConflict: 'document_id' })
+      } catch {}
+    }
+
+    if (!shortText && text) {
+      const normalized = normalizeForPrompt(text)
+      shortText = buildShortText(normalized, 12000)
+      try { await supabase.from('documents_text').update({ normalized_text: normalized, short_text: shortText }).eq('document_id', doc.id) } catch {}
+    }
 
     if (!geminiApiKey) {
       return NextResponse.json({ error: 'Gemini API key missing on server' }, { status: 500 })
@@ -115,15 +142,90 @@ export async function POST(req: NextRequest) {
       throw new Error('Gemini temporarily overloaded. Please retry in a moment.')
     }
 
+    const FAST_MODE = (process.env.FAST_MODE ?? '1') === '1'
+    const baseText = shortText || normalizeForPrompt(text)
+    const maxChars = FAST_MODE ? 12000 : 25000
+    const promptText = baseText.length > maxChars ? baseText.slice(0, maxChars) + '\n... [truncated]' : baseText
+
     const system = `You are an expert academic study flow analyzer. Your task is to analyze educational documents and create comprehensive flow state analyses that help students understand learning progression, concept dependencies, and optimal study paths.`
 
     let prompt = ''
     if (type === 'diagram') {
-      prompt = `Document: ${doc.file_name}\n--- Begin Extracted Text ---\n${text}\n--- End Extracted Text ---\n\nAnalyze this entire document and create a FLOW STATE DIAGRAM:\n   - Create a visual ASCII/text diagram showing:\n     * Main topics as nodes\n     * Connections/arrows showing dependencies (use -> or →)\n     * Hierarchical structure (use indentation or tree format)\n     * Learning flow direction\n     * Use boxes, lines, arrows, and clear formatting\n     * Example format:\n       Topic A\n       ├── Subtopic A1\n       │   └── Subtopic A1.1\n       └── Subtopic A2\n           └── Topic B (depends on A2)\n\nIMPORTANT: Return ONLY valid JSON. Escape all quotes, newlines, and special characters in string values. Use \\n for newlines, \\" for quotes.\n\nReturn JSON with this exact key:\n{\n  "flowDiagram": "ASCII diagram here with escaped quotes and newlines"\n}\n\nMake the flowDiagram visually clear with proper formatting. Ensure all quotes inside the string are escaped with \\".`
+      prompt = `Document: ${doc.file_name}\n--- Begin Extracted Text ---\n${promptText}\n--- End Extracted Text ---\n\nAnalyze this entire document and create a FLOW STATE DIAGRAM:
+   - Create a visual ASCII/text diagram showing:
+     * Main topics as nodes
+     * Connections/arrows showing dependencies (use -> or →)
+     * Hierarchical structure (use indentation or tree format)
+     * Learning flow direction
+     * Use boxes, lines, arrows, and clear formatting
+     * Example format:
+       Topic A
+       ├── Subtopic A1
+       │   └── Subtopic A1.1
+       └── Subtopic A2
+           └── Topic B (depends on A2)
+
+IMPORTANT: Return ONLY valid JSON. Escape all quotes, newlines, and special characters in string values. Use \n for newlines, \" for quotes.
+
+Return JSON with this exact key:
+{
+  "flowDiagram": "ASCII diagram here with escaped quotes and newlines"
+}
+
+Make the flowDiagram visually clear with proper formatting. Ensure all quotes inside the string are escaped with \".`
     } else if (type === 'analysis') {
-      prompt = `Document: ${doc.file_name}\n--- Begin Extracted Text ---\n${text}\n--- End Extracted Text ---\n\nAnalyze this entire document and generate a FLOW STATE ANALYSIS:\n   - Identify the main topics and subtopics\n   - Map out the learning progression (which concepts build on others)\n   - Highlight prerequisites and dependencies\n   - Organize concepts in a logical study sequence\n   - Note key relationships between topics\n   - Suggest optimal learning path\n   - Format as structured, readable text with clear sections\n\nIMPORTANT: Return ONLY valid JSON. Escape all quotes, newlines, and special characters in string values. Use \\n for newlines, \\" for quotes.\n\nReturn JSON with this exact key:\n{\n  "flowAnalysis": "detailed text analysis here with escaped quotes and newlines"\n}\n\nMake the flowAnalysis comprehensive (500-1000 words). Ensure all quotes inside the string are escaped with \\".`
+      prompt = `Document: ${doc.file_name}\n--- Begin Extracted Text ---\n${promptText}\n--- End Extracted Text ---\n\nAnalyze this entire document and generate a FLOW STATE ANALYSIS:
+   - Identify the main topics and subtopics
+   - Map out the learning progression (which concepts build on others)
+   - Highlight prerequisites and dependencies
+   - Organize concepts in a logical study sequence
+   - Note key relationships between topics
+   - Suggest optimal learning path
+   - Format as structured, readable text with clear sections
+
+IMPORTANT: Return ONLY valid JSON. Escape all quotes, newlines, and special characters in string values. Use \n for newlines, \" for quotes.
+
+Return JSON with this exact key:
+{
+  "flowAnalysis": "detailed text analysis here with escaped quotes and newlines"
+}
+
+Make the flowAnalysis comprehensive (500-1000 words). Ensure all quotes inside the string are escaped with \".`
     } else {
-      prompt = `Document: ${doc.file_name}\n--- Begin Extracted Text ---\n${text}\n--- End Extracted Text ---\n\nAnalyze this entire document and generate:\n\n1. FLOW STATE ANALYSIS:\n   - Identify the main topics and subtopics\n   - Map out the learning progression (which concepts build on others)\n   - Highlight prerequisites and dependencies\n   - Organize concepts in a logical study sequence\n   - Note key relationships between topics\n   - Suggest optimal learning path\n   - Format as structured, readable text with clear sections\n\n2. FLOW STATE DIAGRAM:\n   - Create a visual ASCII/text diagram showing:\n     * Main topics as nodes\n     * Connections/arrows showing dependencies (use -> or →)\n     * Hierarchical structure (use indentation or tree format)\n     * Learning flow direction\n     * Use boxes, lines, arrows, and clear formatting\n     * Example format:\n       Topic A\n       ├── Subtopic A1\n       │   └── Subtopic A1.1\n       └── Subtopic A2\n           └── Topic B (depends on A2)\n\nIMPORTANT: Return ONLY valid JSON. Escape all quotes, newlines, and special characters in string values. Use \\n for newlines, \\" for quotes.\n\nReturn JSON with these exact keys:\n{\n  "flowAnalysis": "detailed text analysis here with escaped quotes and newlines",\n  "flowDiagram": "ASCII diagram here with escaped quotes and newlines"\n}\n\nMake the flowAnalysis comprehensive (500-1000 words) and the flowDiagram visually clear with proper formatting. Ensure all quotes inside strings are escaped with \\".`
+      prompt = `Document: ${doc.file_name}\n--- Begin Extracted Text ---\n${promptText}\n--- End Extracted Text ---\n\nAnalyze this entire document and generate:
+
+1. FLOW STATE ANALYSIS:
+   - Identify the main topics and subtopics
+   - Map out the learning progression (which concepts build on others)
+   - Highlight prerequisites and dependencies
+   - Organize concepts in a logical study sequence
+   - Note key relationships between topics
+   - Suggest optimal learning path
+   - Format as structured, readable text with clear sections
+
+2. FLOW STATE DIAGRAM:
+   - Create a visual ASCII/text diagram showing:
+     * Main topics as nodes
+     * Connections/arrows showing dependencies (use -> or →)
+     * Hierarchical structure (use indentation or tree format)
+     * Learning flow direction
+     * Use boxes, lines, arrows, and clear formatting
+     * Example format:
+       Topic A
+       ├── Subtopic A1
+       │   └── Subtopic A1.1
+       └── Subtopic A2
+           └── Topic B (depends on A2)
+
+IMPORTANT: Return ONLY valid JSON. Escape all quotes, newlines, and special characters in string values. Use \n for newlines, \" for quotes.
+
+Return JSON with these exact keys:
+{
+  "flowAnalysis": "detailed text analysis here with escaped quotes and newlines",
+  "flowDiagram": "ASCII diagram here with escaped quotes and newlines"
+}
+
+Make the flowAnalysis comprehensive (500-1000 words) and the flowDiagram visually clear with proper formatting. Ensure all quotes inside strings are escaped with \".`
     }
 
     const output = await callGeminiWithRetries(system, prompt)
@@ -188,13 +290,10 @@ export async function POST(req: NextRequest) {
         let jsonStr = cleanedOutput.substring(openBrace, jsonEnd)
         
         // Try to fix unescaped newlines in string values
-        // This is a simpler approach: look for patterns like "key": "value with
-        // newline" and fix them
         jsonStr = jsonStr.replace(/("flowAnalysis"\s*:\s*")([\s\S]*?)(")/g, (match, prefix, content, suffix) => {
-          // Escape newlines, quotes, and backslashes in content
           const escaped = content
             .replace(/\\/g, '\\\\')
-            .replace(/"/g, '\\"')
+            .replace(/\"/g, '\\"')
             .replace(/\n/g, '\\n')
             .replace(/\r/g, '\\r')
             .replace(/\t/g, '\\t')
@@ -204,7 +303,7 @@ export async function POST(req: NextRequest) {
         jsonStr = jsonStr.replace(/("flowDiagram"\s*:\s*")([\s\S]*?)(")/g, (match, prefix, content, suffix) => {
           const escaped = content
             .replace(/\\/g, '\\\\')
-            .replace(/"/g, '\\"')
+            .replace(/\"/g, '\\"')
             .replace(/\n/g, '\\n')
             .replace(/\r/g, '\\r')
             .replace(/\t/g, '\\t')
@@ -215,7 +314,6 @@ export async function POST(req: NextRequest) {
       } catch (repairError: any) {
         // If repair fails, try regex extraction as fallback
         try {
-          // Extract using regex with dotall flag
           const analysisMatch = cleanedOutput.match(/"flowAnalysis"\s*:\s*"([\s\S]*?)"\s*[,}]/)
           const diagramMatch = cleanedOutput.match(/"flowDiagram"\s*:\s*"([\s\S]*?)"\s*[,}]/)
           
@@ -225,7 +323,6 @@ export async function POST(req: NextRequest) {
               flowDiagram: diagramMatch ? diagramMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n') : ''
             }
           } else {
-            // Ultimate fallback: split output
             const mid = Math.floor(cleanedOutput.length / 2)
             json = {
               flowAnalysis: cleanedOutput.slice(0, mid),
@@ -233,7 +330,6 @@ export async function POST(req: NextRequest) {
             }
           }
         } catch (finalError: any) {
-          // Last resort
           json = {
             flowAnalysis: 'Error parsing flow analysis. Raw response: ' + cleanedOutput.slice(0, 500),
             flowDiagram: 'Error parsing flow diagram'
@@ -242,7 +338,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Ensure we have valid strings and return only requested type
     if (type === 'diagram') {
       const flowDiagram = typeof json.flowDiagram === 'string' ? json.flowDiagram : String(json.flowDiagram || '')
       const unescapedDiagram = flowDiagram.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r')
@@ -252,7 +347,6 @@ export async function POST(req: NextRequest) {
       const unescapedAnalysis = flowAnalysis.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r')
       return NextResponse.json({ id: doc.id, flowAnalysis: unescapedAnalysis })
     } else {
-      // type === 'both'
       let flowAnalysis = typeof json.flowAnalysis === 'string' ? json.flowAnalysis : String(json.flowAnalysis || '')
       let flowDiagram = typeof json.flowDiagram === 'string' ? json.flowDiagram : String(json.flowDiagram || '')
       flowAnalysis = flowAnalysis.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r')

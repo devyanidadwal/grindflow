@@ -15,11 +15,26 @@ export default function SignInPage() {
 
   useEffect(() => {
     async function checkAuth() {
-      const { data } = await supabase.auth.getSession()
-      if (data?.session) {
-        router.push('/dashboard')
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        
+        // Handle refresh token errors
+        if (error && (error.message?.includes('refresh') || error.message?.includes('Refresh Token'))) {
+          console.log('[SIGNIN] Invalid refresh token, clearing session')
+          await supabase.auth.signOut()
+          setChecking(false)
+          return
+        }
+        
+        if (data?.session) {
+          router.push('/dashboard')
+        }
+        setChecking(false)
+      } catch (e) {
+        console.error('[SIGNIN] Auth check error:', e)
+        await supabase.auth.signOut()
+        setChecking(false)
       }
-      setChecking(false)
     }
     checkAuth()
   }, [router])

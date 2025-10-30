@@ -8,7 +8,7 @@ import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import SoftCard from '@/components/ui/soft-card'
 import PrettyFlow from '@/components/ui/pretty-flow'
-import { motion } from 'motion/react'
+import { motion } from 'framer-motion'
 import ModalPortal from '@/components/ui/modal-portal'
 
 export default function Dashboard() {
@@ -58,7 +58,15 @@ export default function Dashboard() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
       
+      console.log('[AUTH] State change:', event, session ? 'has session' : 'no session')
+      
+      // Handle token refresh errors
+      if (event === 'TOKEN_REFRESHED') {
+        console.log('[AUTH] Token refreshed successfully')
+      }
+      
       if (event === 'SIGNED_OUT' || !session) {
+        console.log('[AUTH] User signed out or no session, redirecting to login')
         setIsAuthenticated(false)
         setUserEmail('')
         setAuthStatus('Not signed in')
@@ -87,8 +95,17 @@ export default function Dashboard() {
         if (!mounted) return
         
         if (error) {
-          // eslint-disable-next-line no-console
-          console.error('[AUTH] getSession error', error)
+          console.error('[AUTH] getSession error:', error.message)
+          
+          // Handle refresh token errors by signing out
+          if (error.message?.includes('refresh') || error.message?.includes('Refresh Token')) {
+            console.log('[AUTH] Invalid refresh token, clearing session and redirecting')
+            await supabase.auth.signOut()
+            setIsAuthenticated(false)
+            setIsLoading(false)
+            router.replace('/login')
+            return
+          }
         }
         
         const session = data?.session

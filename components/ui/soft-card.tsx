@@ -1,7 +1,7 @@
 "use client"
 
 import { ReactNode, CSSProperties } from 'react'
-import { motion } from 'motion/react'
+import { motion } from 'framer-motion'
 
 interface SoftCardProps {
   className?: string

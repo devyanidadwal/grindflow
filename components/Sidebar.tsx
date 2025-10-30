@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-import { motion } from 'motion/react'
+import { motion } from 'framer-motion'
 
 interface SidebarProps {
   activeView: string
@@ -72,6 +72,13 @@ export default function Sidebar({ activeView, onViewChange, username = 'Devyani'
         <path d="M5 14h14" />
       </svg>
     ) },
+    { id: 'pro-upgrade', label: 'Pro Upgrade', icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+        <path d="M2 17l10 5 10-5" />
+        <path d="M2 12l10 5 10-5" />
+      </svg>
+    ) },
     { id: 'settings', label: 'Settings', icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
@@ -100,10 +107,18 @@ export default function Sidebar({ activeView, onViewChange, username = 'Devyani'
       <nav className="flex flex-col gap-2">
         {navItems.map((item) => {
           const isActive = activeView === item.id
+          const handleClick = () => {
+            if (item.id === 'pro-upgrade') {
+              router.push('/pro-upgrade')
+            } else {
+              onViewChange(item.id)
+            }
+          }
+          
           return (
             <motion.button
               key={item.id}
-              onClick={() => onViewChange(item.id)}
+              onClick={handleClick}
               className={`group relative text-left px-3 py-2.5 rounded-[10px] border-none bg-transparent text-inherit cursor-pointer flex items-center gap-2 transition-colors ${
                 isActive ? 'font-semibold' : ''
               }`}

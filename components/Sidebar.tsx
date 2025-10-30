@@ -59,19 +59,6 @@ export default function Sidebar({ activeView, onViewChange, username = 'Devyani'
         <path d="M5 7v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7" />
       </svg>
     ) },
-    { id: 'wallet', label: 'Wallet', icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z" />
-        <path d="M16 11h4" />
-      </svg>
-    ) },
-    { id: 'wallet-transactions', label: 'Wallet Transactions', icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 6h18" />
-        <path d="M7 10h10" />
-        <path d="M5 14h14" />
-      </svg>
-    ) },
     { id: 'pro-upgrade', label: 'Pro Upgrade', icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 2L2 7l10 5 10-5-10-5z" />

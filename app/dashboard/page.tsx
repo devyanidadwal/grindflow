@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
@@ -12,7 +12,7 @@ import { motion } from 'framer-motion'
 import ModalPortal from '@/components/ui/modal-portal'
 
 export default function Dashboard() {
-  const searchParams = useSearchParams()
+  // read search params from window (client-safe) and listen for popstate to handle back/forward
   const [activeView, setActiveView] = useState('home')
   const [showAuth, setShowAuth] = useState(false)
   const [authEmail, setAuthEmail] = useState('')
@@ -52,13 +52,25 @@ export default function Dashboard() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
 
-  // Read view from URL query parameter on mount and when it changes
+  // Read view from URL query parameter on mount and when history changes
   useEffect(() => {
-    const viewParam = searchParams.get('view')
-    if (viewParam && ['home', 'my-docs', 'quiz', 'studyflow', 'settings'].includes(viewParam)) {
-      setActiveView(viewParam)
+    const applyFromLocation = () => {
+      try {
+        const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
+        const viewParam = params.get('view')
+        if (viewParam && ['home', 'my-docs', 'quiz', 'studyflow', 'settings'].includes(viewParam)) {
+          setActiveView(viewParam)
+        }
+      } catch (e) {
+        // ignore
+      }
     }
-  }, [searchParams])
+
+    applyFromLocation()
+    const onPop = () => applyFromLocation()
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   useEffect(() => {
     let mounted = true

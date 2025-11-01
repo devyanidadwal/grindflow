@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import Sidebar from '@/components/Sidebar'
@@ -9,35 +9,50 @@ import Header from '@/components/Header'
 
 export default function PublicUploadPage() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const docId = searchParams.get('doc')
-  
-  // Read score, keyword, and analysis data from URL params
+  const [docId, setDocId] = useState<string | null>(null)
+
+  // Read score, keyword, doc id and analysis data from URL params on client only
   useEffect(() => {
-    const scoreParam = searchParams.get('score')
-    const keywordParam = searchParams.get('keyword')
-    const verdictParam = searchParams.get('verdict')
-    const rationaleParam = searchParams.get('rationale')
-    const focusTopicsParam = searchParams.get('focus_topics')
-    const repetitiveTopicsParam = searchParams.get('repetitive_topics')
-    const suggestedPlanParam = searchParams.get('suggested_plan')
-    
-    if (scoreParam) {
-      const parsed = parseFloat(scoreParam)
-      if (!isNaN(parsed)) setScore(parsed)
+    const applyFromLocation = () => {
+      try {
+        if (typeof window === 'undefined') return
+        const params = new URLSearchParams(window.location.search)
+        const d = params.get('doc')
+        setDocId(d)
+
+        const scoreParam = params.get('score')
+        const keywordParam = params.get('keyword')
+        const verdictParam = params.get('verdict')
+        const rationaleParam = params.get('rationale')
+        const focusTopicsParam = params.get('focus_topics')
+        const repetitiveTopicsParam = params.get('repetitive_topics')
+        const suggestedPlanParam = params.get('suggested_plan')
+
+        if (scoreParam) {
+          const parsed = parseFloat(scoreParam)
+          if (!isNaN(parsed)) setScore(parsed)
+        }
+        if (keywordParam) setAnalysisKeyword(decodeURIComponent(keywordParam))
+
+        if (verdictParam || rationaleParam || focusTopicsParam || repetitiveTopicsParam || suggestedPlanParam) {
+          setAnalysisData({
+            verdict: verdictParam || undefined,
+            rationale: rationaleParam ? decodeURIComponent(rationaleParam) : undefined,
+            focus_topics: focusTopicsParam ? JSON.parse(focusTopicsParam) : undefined,
+            repetitive_topics: repetitiveTopicsParam ? JSON.parse(repetitiveTopicsParam) : undefined,
+            suggested_plan: suggestedPlanParam ? JSON.parse(suggestedPlanParam) : undefined,
+          })
+        }
+      } catch (e) {
+        // ignore malformed params
+      }
     }
-    if (keywordParam) setAnalysisKeyword(decodeURIComponent(keywordParam))
-    
-    if (verdictParam || rationaleParam || focusTopicsParam || repetitiveTopicsParam || suggestedPlanParam) {
-      setAnalysisData({
-        verdict: verdictParam || undefined,
-        rationale: rationaleParam ? decodeURIComponent(rationaleParam) : undefined,
-        focus_topics: focusTopicsParam ? JSON.parse(focusTopicsParam) : undefined,
-        repetitive_topics: repetitiveTopicsParam ? JSON.parse(repetitiveTopicsParam) : undefined,
-        suggested_plan: suggestedPlanParam ? JSON.parse(suggestedPlanParam) : undefined,
-      })
-    }
-  }, [searchParams])
+
+    applyFromLocation()
+    const onPop = () => applyFromLocation()
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
   
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(false)

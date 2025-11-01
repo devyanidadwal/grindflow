@@ -211,7 +211,7 @@ export default function ExplorePage() {
               >
                 <option value="">All Subjects</option>
                 {subjects.map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                  <option key={String(s)} value={s ?? ''}>{s}</option>
                 ))}
               </select>
               <select
@@ -221,7 +221,7 @@ export default function ExplorePage() {
               >
                 <option value="">All Years</option>
                 {years.map((y) => (
-                  <option key={y} value={y}>{y}</option>
+                  <option key={String(y)} value={y ?? ''}>{y}</option>
                 ))}
               </select>
               <select
@@ -231,7 +231,7 @@ export default function ExplorePage() {
               >
                 <option value="">All Degrees</option>
                 {degrees.map((d) => (
-                  <option key={d} value={d}>{d}</option>
+                  <option key={String(d)} value={d ?? ''}>{d}</option>
                 ))}
               </select>
               {(selectedFilters.subject || selectedFilters.year || selectedFilters.degree) && (
@@ -336,7 +336,7 @@ export default function ExplorePage() {
                                                   {doc.analysis_keyword && (
                                                     <span className="text-muted">Keyword: <span className="font-medium">{doc.analysis_keyword}</span></span>
                                                   )}
-                                                  {(doc.verdict || doc.rationale || doc.focus_topics?.length) && (
+                                                  {(doc.verdict || doc.rationale || (Array.isArray(doc.focus_topics) && doc.focus_topics.length > 0)) && (
                                                     <>
                                                       <span className="text-muted">•</span>
                                                       <button
@@ -442,23 +442,23 @@ export default function ExplorePage() {
                   </section>
                 )}
 
-                {(doc.focus_topics?.length || doc.repetitive_topics?.length) && (
+                {((Array.isArray(doc.focus_topics) && doc.focus_topics.length > 0) || (Array.isArray(doc.repetitive_topics) && doc.repetitive_topics.length > 0)) && (
                   <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {doc.focus_topics?.length > 0 && (
+                    {Array.isArray(doc.focus_topics) && doc.focus_topics.length > 0 && (
                       <div className="bg-white/5 rounded-lg p-4 border border-white/10">
                         <h4 className="font-semibold mb-2 text-sm">Focus Topics</h4>
                         <ul className="m-0 pl-5 space-y-1 text-sm">
-                          {doc.focus_topics.map((t, i) => (
+                          {(doc.focus_topics || []).map((t, i) => (
                             <li key={i}>{t}</li>
                           ))}
                         </ul>
                       </div>
                     )}
-                    {doc.repetitive_topics?.length > 0 && (
+                    {Array.isArray(doc.repetitive_topics) && doc.repetitive_topics.length > 0 && (
                       <div className="bg-white/5 rounded-lg p-4 border border-white/10">
                         <h4 className="font-semibold mb-2 text-sm">Repetitive Topics</h4>
                         <ul className="m-0 pl-5 space-y-1 text-sm">
-                          {doc.repetitive_topics.map((t, i) => (
+                          {(doc.repetitive_topics || []).map((t, i) => (
                             <li key={i}>{t}</li>
                           ))}
                         </ul>
@@ -467,11 +467,11 @@ export default function ExplorePage() {
                   </section>
                 )}
 
-                {doc.suggested_plan?.length > 0 && (
+                {Array.isArray(doc.suggested_plan) && doc.suggested_plan.length > 0 && (
                   <section className="bg-white/5 rounded-lg p-4 border border-white/10">
                     <h4 className="font-semibold mb-2">Suggested Study Plan</h4>
                     <ol className="m-0 pl-5 space-y-1 text-sm">
-                      {doc.suggested_plan.map((t, i) => (
+                      {(doc.suggested_plan || []).map((t, i) => (
                         <li key={i}>{t}</li>
                       ))}
                     </ol>

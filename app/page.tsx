@@ -7,8 +7,17 @@ import SoftCard from '@/components/ui/soft-card'
 export default function Landing() {
   async function signInWithGoogle() {
     try {
-      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : undefined
-      const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } })
+      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      })
       if (error) throw error
     } catch (e: any) {
       toast.error(e?.message || 'Google sign-in failed')

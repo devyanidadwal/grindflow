@@ -3,6 +3,11 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  // Check if the route requires authentication
+  const requiresAuth = ['/dashboard'].some(path => pathname.startsWith(path))
+  
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -34,7 +39,19 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  await supabase.auth.getSession()
+  const { data: { session } } = await supabase.auth.getSession()
+
+  // NOTE: don't rewrite or redirect /dashboard here. The Supabase PKCE flow
+  // stores the verifier in browser localStorage and the browser completes the
+  // session creation client-side. Middleware runs on the server and cannot
+  // reliably detect a session stored only in localStorage, which causes valid
+  // sign-ins to be redirected away from the dashboard. Let the client handle
+  // navigation to `/dashboard` after it finishes the OAuth exchange.
+
+  // Redirect signin/login to home page as well
+  if (pathname === '/signin' || pathname === '/login') {
+    return NextResponse.redirect(new URL('/', request.url))
+  }
 
   return response
 }

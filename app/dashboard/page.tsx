@@ -12,7 +12,7 @@ import { motion } from 'framer-motion'
 import ModalPortal from '@/components/ui/modal-portal'
 
 export default function Dashboard() {
-  // read search params from window (client-safe) and listen for popstate to handle back/forward
+  const router = useRouter()
   const [activeView, setActiveView] = useState('home')
   const [showAuth, setShowAuth] = useState(false)
   const [authEmail, setAuthEmail] = useState('')
@@ -50,7 +50,6 @@ export default function Dashboard() {
   const [showStudyflowAnalysis, setShowStudyflowAnalysis] = useState(false)
   const [showUploadToPublicPopup, setShowUploadToPublicPopup] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const router = useRouter()
 
   // Read view from URL query parameter on mount and when history changes
   useEffect(() => {
@@ -74,6 +73,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     let mounted = true
+    let isInitialMount = true
 
     // Quick synchronous check first
     supabase.auth.getSession().then(({ data, error }) => {
@@ -83,16 +83,21 @@ export default function Dashboard() {
         setIsAuthenticated(true)
         setUserEmail(email)
         setAuthStatus(`Signed in as ${email}`)
+        if (!isInitialMount && !window.location.pathname.includes('/dashboard')) {
+          router.replace('/dashboard?view=home')
+        }
       } else if (error?.message?.includes('refresh') || error?.message?.includes('Refresh Token')) {
         supabase.auth.signOut().then(() => router.replace('/'))
       }
+      isInitialMount = false
     })
 
     // Set up auth state listener for real-time updates
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
+      console.log('Auth state change:', event, !!session)
       
-      if (event === 'SIGNED_OUT' || !session) {
+        if (event === 'SIGNED_OUT' || !session) {
         setIsAuthenticated(false)
         setUserEmail('')
         setAuthStatus('Not signed in')
@@ -104,6 +109,19 @@ export default function Dashboard() {
         setUserEmail(email)
         setAuthStatus(`Signed in as ${email}`)
         docsLoadedRef.current = false // Reset so docs load for new session
+        setActiveView('home')
+
+        // Redirect explicitly when a fresh sign-in happens (ensures Google OAuth returns land on dashboard)
+        if (event === 'SIGNED_IN') {
+          toast.success('Logged in successfully!')
+          // Force full navigation so the freshly-stored session is picked up
+          window.location.href = '/dashboard'
+        } else {
+          // For other session events, ensure consistency by navigating to dashboard if not already there
+          if (!window.location.pathname.includes('/dashboard')) {
+            window.location.href = '/dashboard'
+          }
+        }
       }
     })
 
@@ -115,20 +133,7 @@ export default function Dashboard() {
 
   // Email/password sign-in removed in favor of Google OAuth
 
-  const handleGoogleSignIn = async () => {
-    try {
-      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : undefined
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo },
-      })
-      if (error) throw error
-      // For OAuth, Supabase will redirect; as a guard, show a toast
-      toast.info('Redirecting to Google…')
-    } catch (e: any) {
-      toast.error(`Google sign-in failed: ${e.message || e}`)
-    }
-  }
+  // Authentication handlers will be implemented here
 
   // Email/password sign-up removed
 
@@ -337,14 +342,8 @@ export default function Dashboard() {
           {(activeView === 'auth' || showAuth) && (
             <section className="fade visible flex flex-col items-center justify-center gap-[18px] min-h-[80vh]">
               <div className="card">
-                <h3 className="mt-0 mb-4 text-xl font-semibold">Continue with Google</h3>
+                <h3 className="mt-0 mb-4 text-xl font-semibold">Sign In</h3>
                 <p className="mb-2 text-sm">{authStatus}</p>
-                <div className="mt-1">
-                  <button onClick={handleGoogleSignIn} className="btn-secondary inline-flex items-center gap-2">
-                    <svg width="16" height="16" viewBox="0 0 533.5 544.3" aria-hidden="true"><path fill="#4285F4" d="M533.5 278.4c0-18.6-1.7-37-5.2-54.8H272.1v103.8h147c-6.3 34.1-25.4 63-54.2 82.3v68h87.5c51.2-47.2 81.1-116.8 81.1-199.3z"/><path fill="#34A853" d="M272.1 544.3c73.4 0 135.3-24.3 180.4-66.1l-87.5-68c-24.3 16.3-55.3 26.1-92.9 26.1-71.3 0-131.8-48-153.5-112.4H28.7v70.7C73.3 486.4 166.5 544.3 272.1 544.3z"/><path fill="#FBBC05" d="M118.6 323.9c-10.8-31.9-10.8-66.4 0-98.3V154.9H28.7c-38.3 76.3-38.3 167.8 0 244.1l89.9-75.1z"/><path fill="#EA4335" d="M272.1 106.6c39.8-.6 78.1 14.3 107.1 41.9l79.8-79.8C404.9 25.2 340.6-.2 272.1 0 166.5 0 73.3 57.9 28.7 154.9l89.9 70.7c21.7-64.5 82.2-112.4 153.5-119z"/></svg>
-                    Continue with Google
-                  </button>
-                </div>
                 <div className="mt-3">
                   <button onClick={handleSignOut} className="btn-ghost">Sign Out</button>
                 </div>
@@ -352,7 +351,17 @@ export default function Dashboard() {
             </section>
           )}
 
-          {activeView === 'home' && (
+          {(!isAuthenticated && activeView !== 'auth') && (
+            <section className="fade visible flex flex-col items-center justify-center gap-[18px] min-h-[80vh]">
+              <div className="card">
+                <h3 className="mt-0 mb-4 text-xl font-semibold">Please Sign In</h3>
+                <p className="mb-2 text-sm">Sign in to access this feature</p>
+                <button onClick={() => setActiveView('auth')} className="btn-primary">Sign In</button>
+              </div>
+            </section>
+          )}
+
+          {activeView === 'home' && isAuthenticated && (
             <section className="fade visible flex flex-col items-center justify-center gap-[18px] min-h-[80vh]">
               <SoftCard>
                 <h3 className="mt-0 mb-4 text-xl font-semibold">Upload Document</h3>

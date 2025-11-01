@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
@@ -12,6 +12,7 @@ import { motion } from 'framer-motion'
 import ModalPortal from '@/components/ui/modal-portal'
 
 export default function Dashboard() {
+  const searchParams = useSearchParams()
   const [activeView, setActiveView] = useState('home')
   const [showAuth, setShowAuth] = useState(false)
   const [authEmail, setAuthEmail] = useState('')
@@ -29,7 +30,7 @@ export default function Dashboard() {
   const [authStatus, setAuthStatus] = useState('Not signed in')
   const [userEmail, setUserEmail] = useState<string>('')
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
   // Quiz states
   const [quizSelectedDocId, setQuizSelectedDocId] = useState<string>('')
   const [quizSelectOpen, setQuizSelectOpen] = useState(false)
@@ -47,115 +48,56 @@ export default function Dashboard() {
   const [studyflowAnalysis, setStudyflowAnalysis] = useState<string>('')
   const [studyflowDiagram, setStudyflowDiagram] = useState<string>('')
   const [showStudyflowAnalysis, setShowStudyflowAnalysis] = useState(false)
+  const [showUploadToPublicPopup, setShowUploadToPublicPopup] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
 
+  // Read view from URL query parameter on mount and when it changes
+  useEffect(() => {
+    const viewParam = searchParams.get('view')
+    if (viewParam && ['home', 'my-docs', 'quiz', 'studyflow', 'settings'].includes(viewParam)) {
+      setActiveView(viewParam)
+    }
+  }, [searchParams])
+
   useEffect(() => {
     let mounted = true
-    let redirectTimeout: NodeJS.Timeout | null = null
 
-    // Set up auth state listener FIRST so it catches immediate session changes
+    // Quick synchronous check first
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return
+      if (data?.session) {
+        const email = data.session.user.email || 'User'
+        setIsAuthenticated(true)
+        setUserEmail(email)
+        setAuthStatus(`Signed in as ${email}`)
+      } else if (error?.message?.includes('refresh') || error?.message?.includes('Refresh Token')) {
+        supabase.auth.signOut().then(() => router.replace('/'))
+      }
+    })
+
+    // Set up auth state listener for real-time updates
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
       
-      console.log('[AUTH] State change:', event, session ? 'has session' : 'no session')
-      
-      // Handle token refresh errors
-      if (event === 'TOKEN_REFRESHED') {
-        console.log('[AUTH] Token refreshed successfully')
-      }
-      
       if (event === 'SIGNED_OUT' || !session) {
-        console.log('[AUTH] User signed out or no session, redirecting to login')
         setIsAuthenticated(false)
         setUserEmail('')
         setAuthStatus('Not signed in')
-        setIsLoading(false)
-        if (redirectTimeout) {
-          clearTimeout(redirectTimeout)
-        }
+        docsLoadedRef.current = false // Reset so docs reload on next login
         router.replace('/')
       } else if (session) {
         const email = session.user.email || 'User'
         setIsAuthenticated(true)
         setUserEmail(email)
         setAuthStatus(`Signed in as ${email}`)
-        setIsLoading(false)
-        if (redirectTimeout) {
-          clearTimeout(redirectTimeout)
-          redirectTimeout = null
-        }
+        docsLoadedRef.current = false // Reset so docs load for new session
       }
     })
-
-    // Initial auth check with retry
-    async function checkAuth(retries = 2) {
-      try {
-        const { data, error } = await supabase.auth.getSession()
-        if (!mounted) return
-        
-        if (error) {
-          console.error('[AUTH] getSession error:', error.message)
-          
-          // Handle refresh token errors by signing out
-          if (error.message?.includes('refresh') || error.message?.includes('Refresh Token')) {
-            console.log('[AUTH] Invalid refresh token, clearing session and redirecting')
-            await supabase.auth.signOut()
-            setIsAuthenticated(false)
-            setIsLoading(false)
-            router.replace('/')
-            return
-          }
-        }
-        
-        const session = data?.session
-        if (session) {
-          const email = session.user.email || 'User'
-          setIsAuthenticated(true)
-          setUserEmail(email)
-          setAuthStatus(`Signed in as ${email}`)
-          setIsLoading(false)
-          if (redirectTimeout) {
-            clearTimeout(redirectTimeout)
-            redirectTimeout = null
-          }
-        } else {
-          // No session - wait a bit for auth state change to fire, then redirect
-          if (retries > 0) {
-            setTimeout(() => {
-              if (mounted) checkAuth(retries - 1)
-            }, 300)
-          } else {
-            // After retries, set up a delayed redirect to give auth state change time
-            setIsLoading(false)
-            redirectTimeout = setTimeout(() => {
-              if (mounted) {
-                router.replace('/')
-              }
-            }, 1500)
-          }
-        }
-      } catch (err: any) {
-        if (!mounted) return
-        // eslint-disable-next-line no-console
-        console.error('[AUTH] getSession failed', err)
-        setIsLoading(false)
-        // Don't redirect immediately on error - let auth state change handle it
-      }
-    }
-
-    checkAuth()
-
-    // Safety: ensure we never stay stuck loading
-    const timeout = setTimeout(() => {
-      if (mounted) setIsLoading(false)
-    }, 3000)
 
     return () => {
       mounted = false
       subscription.unsubscribe()
-      if (timeout) clearTimeout(timeout)
-      if (redirectTimeout) clearTimeout(redirectTimeout)
     }
   }, [router])
 
@@ -324,6 +266,9 @@ export default function Dashboard() {
       if (r?.score != null) {
         setScores((s) => ({ ...s, [id]: { score: r.score, verdict: r.verdict || '', rationale: r.rationale, focus_topics: r.focus_topics, repetitive_topics: r.repetitive_topics, suggested_plan: r.suggested_plan } }))
         toast.success(`Score: ${r.score}`)
+        if (r.score >= 80) {
+          setShowUploadToPublicPopup(id)
+        }
       } else {
         toast.info('Analysis complete, but no score returned')
       }
@@ -336,30 +281,36 @@ export default function Dashboard() {
     }
   }
 
+  const docsLoadedRef = useRef(false)
   useEffect(() => {
+    // Load documents when switching to views that need them (non-blocking)
     if ((activeView === 'my-docs' || activeView === 'quiz' || activeView === 'studyflow') && isAuthenticated) {
-      loadDocuments()
+      if (!docsLoadedRef.current || activeView === 'my-docs') {
+        docsLoadedRef.current = true
+        loadDocuments()
+      }
     }
   }, [activeView, isAuthenticated])
 
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="text-xl font-semibold mb-2">Loading...</div>
-          <div className="text-sm text-muted">Checking authentication...</div>
-        </div>
-      </div>
-    )
-  }
-
-  if (!isAuthenticated) {
-    return null
-  }
+  // Render immediately, auth will update async
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar activeView={activeView} onViewChange={setActiveView} />
+      <Sidebar 
+        activeView={activeView} 
+        onViewChange={(view) => {
+          setActiveView(view)
+          // Update URL to preserve view when navigating
+          const params = new URLSearchParams(window.location.search)
+          if (view === 'home') {
+            params.delete('view')
+          } else {
+            params.set('view', view)
+          }
+          const newUrl = params.toString() ? `/dashboard?${params.toString()}` : '/dashboard'
+          window.history.pushState({}, '', newUrl)
+        }} 
+      />
       <div className="flex-1 flex flex-col">
         <Header
           title={activeView === 'auth' ? 'AUTH' : pageTitles[activeView] || 'Dashboard'}
@@ -592,10 +543,27 @@ export default function Dashboard() {
                       {quizSelectedDocId ? 'Change PDF' : 'Select PDF'}
                     </button>
                     {quizSelectedDocId && (
-                      <div className="mt-2 inline-flex items-center gap-2 text-[13px] text-eaf0ff bg-white/5 border border-white/10 rounded-full px-3 py-1">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-                        <span className="truncate max-w-[220px]">{documents.find(d => d.id === quizSelectedDocId)?.file_name || quizSelectedDocId}</span>
-                        <button type="button" onClick={() => setQuizSelectedDocId('')} className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1" aria-label="Clear selected document">×</button>
+                      <div className="mt-2 flex items-center gap-2 flex-wrap">
+                        <div className="inline-flex items-center gap-2 text-[13px] text-eaf0ff bg-white/5 border border-white/10 rounded-full px-3 py-1">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+                          <span className="truncate max-w-[220px]">{documents.find(d => d.id === quizSelectedDocId)?.file_name || quizSelectedDocId}</span>
+                          <button type="button" onClick={() => setQuizSelectedDocId('')} className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1" aria-label="Clear selected document">×</button>
+                        </div>
+                        {documents.find(d => d.id === quizSelectedDocId)?.publicUrl && (
+                          <a
+                            href={documents.find(d => d.id === quizSelectedDocId)?.publicUrl || '#'}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn-secondary text-xs px-2 py-1 inline-flex items-center gap-1"
+                            title="View PDF"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </svg>
+                            View PDF
+                          </a>
+                        )}
                       </div>
                     )}
                   </div>
@@ -825,11 +793,28 @@ export default function Dashboard() {
                       {studyflowSelectedDocId ? 'Change PDF' : 'Select PDF'}
                     </button>
                     {studyflowSelectedDocId && (
-                      <span className="inline-flex items-center gap-2 text-[13px] text-eaf0ff bg-white/5 border border-white/10 rounded-full px-3 py-1">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-                        <span className="truncate max-w-[260px]">{documents.find(d => d.id === studyflowSelectedDocId)?.file_name || studyflowSelectedDocId}</span>
-                        <button type="button" onClick={() => setStudyflowSelectedDocId('')} className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1" aria-label="Clear selected document">×</button>
-                      </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex items-center gap-2 text-[13px] text-eaf0ff bg-white/5 border border-white/10 rounded-full px-3 py-1">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+                          <span className="truncate max-w-[260px]">{documents.find(d => d.id === studyflowSelectedDocId)?.file_name || studyflowSelectedDocId}</span>
+                          <button type="button" onClick={() => setStudyflowSelectedDocId('')} className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1" aria-label="Clear selected document">×</button>
+                        </span>
+                        {documents.find(d => d.id === studyflowSelectedDocId)?.publicUrl && (
+                          <a
+                            href={documents.find(d => d.id === studyflowSelectedDocId)?.publicUrl || '#'}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn-secondary text-xs px-2 py-1 inline-flex items-center gap-1"
+                            title="View PDF"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </svg>
+                            View PDF
+                          </a>
+                        )}
+                      </div>
                     )}
                     {studyflowSelectedDocId && (
                       <button
@@ -1029,6 +1014,47 @@ export default function Dashboard() {
             </section>
           )}
         </main>
+
+        {/* Upload to Public Library Popup */}
+        {showUploadToPublicPopup && (
+          <ModalPortal>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" onClick={() => setShowUploadToPublicPopup(null)}>
+              <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="card w-full max-w-md mx-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="mb-4">
+                  <h3 className="mt-0 mb-2 text-xl font-semibold">Great Score! 🎉</h3>
+                  <p className="text-sm text-muted">
+                    Your document scored {scores[showUploadToPublicPopup]?.score || '80+'}. Would you like to share it in the public library?
+                  </p>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setShowUploadToPublicPopup(null)} className="btn-ghost">No, Thanks</button>
+                  <button
+                    onClick={() => {
+                      const docId = showUploadToPublicPopup
+                      const analysisData = scores[docId]
+                      const keyword = analysisQuery
+                      setShowUploadToPublicPopup(null)
+                      const params = new URLSearchParams({ doc: docId })
+                      if (analysisData?.score != null) params.set('score', analysisData.score.toString())
+                      if (keyword) params.set('keyword', keyword)
+                      if (analysisData) {
+                        params.set('verdict', analysisData.verdict || '')
+                        if (analysisData.rationale) params.set('rationale', analysisData.rationale)
+                        if (analysisData.focus_topics?.length) params.set('focus_topics', JSON.stringify(analysisData.focus_topics))
+                        if (analysisData.repetitive_topics?.length) params.set('repetitive_topics', JSON.stringify(analysisData.repetitive_topics))
+                        if (analysisData.suggested_plan?.length) params.set('suggested_plan', JSON.stringify(analysisData.suggested_plan))
+                      }
+                      router.push(`/public-upload?${params.toString()}`)
+                    }}
+                    className="btn-primary"
+                  >
+                    Yes, Share It
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          </ModalPortal>
+        )}
         {/* Footer removed as requested */}
       </div>
     </div>

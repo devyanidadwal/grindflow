@@ -5,10 +5,11 @@ import { normalizeForPrompt, buildShortText } from '@/lib/text'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
-export async function GET(_req: NextRequest, context: { params: Record<string, string> | Promise<Record<string, string>> }) {
+export async function GET(_req: NextRequest, context: any) {
   try {
-    const params = await Promise.resolve(context.params)
-    const id = params.id
+    // context.params may be a Promise in some Next.js runtime typings — resolve safely
+    const params = await Promise.resolve(context?.params)
+    const id = params?.id
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {

@@ -16,7 +16,7 @@ export const env = {
   api: {
     baseUrl: typeof window !== 'undefined' 
       ? window.location.origin 
-      : (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'),
+      : (process.env.NEXT_PUBLIC_API_BASE_URL || ''),
   },
 
   // Server
@@ -30,7 +30,7 @@ export const env = {
   // CORS
   cors: {
     origin: process.env.CORS_ORIGIN?.split(',') || [
-      typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
+      typeof window !== 'undefined' ? window.location.origin : '',
       'https://grindflow.vercel.app',
     ],
   },

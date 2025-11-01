@@ -8,7 +8,11 @@ export async function GET(request: NextRequest) {
   const origin = requestUrl.origin
   
   if (code) {
-    let response = NextResponse.redirect(new URL('/dashboard', origin))
+    const response = NextResponse.next({
+      request: {
+        headers: request.headers,
+      },
+    })
     
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,8 +39,19 @@ export async function GET(request: NextRequest) {
       }
     )
     
-    await supabase.auth.exchangeCodeForSession(code)
-    return response
+    try {
+      const { data: { session }, error } = await supabase.auth.exchangeCodeForSession(code)
+      if (error) throw error
+      
+      // Only redirect after successful session exchange
+      return NextResponse.redirect(new URL('/dashboard', origin), {
+        // Copy over the set cookies to the redirect response
+        headers: response.headers
+      })
+    } catch (error) {
+      console.error('Auth error:', error)
+      return NextResponse.redirect(new URL('/', origin))
+    }
   }
 
   // If no code, redirect to home page

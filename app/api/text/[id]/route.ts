@@ -5,8 +5,9 @@ import { normalizeForPrompt, buildShortText } from '@/lib/text'
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, context: { params: Record<string, string> | Promise<Record<string, string>> }) {
   try {
+    const params = await Promise.resolve(context.params)
     const id = params.id
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 

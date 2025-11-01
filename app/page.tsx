@@ -1,13 +1,19 @@
 "use client"
 
+// no direct React hooks required in this component
+import { useRouter } from 'next/navigation'
 import { ContainerTextFlip } from '@/components/ui/container-text-flip'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import SoftCard from '@/components/ui/soft-card'
 export default function Landing() {
+  const router = useRouter()
+
+  // OAuth callback handling is performed on `/auth/complete`.
+
   async function signInWithGoogle() {
     try {
-      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined
+  const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/auth/complete` : undefined
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {

@@ -40,6 +40,18 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const shouldScrollRef = useRef(false)
+  const nearBottomRef = useRef(true)
+  const initialLoadRef = useRef(true)
+
+  const onMessagesScroll = () => {
+    const container = messagesContainerRef.current
+    if (!container) return
+    const distanceFromBottom = container.scrollHeight - (container.scrollTop + container.clientHeight)
+    nearBottomRef.current = distanceFromBottom <= 150
+    // If user scrolls manually, we should not auto-scroll anymore
+    if (!nearBottomRef.current) shouldScrollRef.current = false
+  }
   const publicRoomId = 'public'
 
   useEffect(() => {
@@ -74,6 +86,11 @@ export default function ChatPage() {
     setActiveRoom(publicRoomId)
   }, [userId])
 
+  // Reset initial-load flag when switching rooms so we don't auto-scroll on room change
+  useEffect(() => {
+    initialLoadRef.current = true
+  }, [activeRoom])
+
   useEffect(() => {
     if (!activeRoom || !userId) return
     
@@ -99,10 +116,37 @@ export default function ChatPage() {
   }, [activeRoom, userId])
 
   useEffect(() => {
-    scrollToBottom()
+    // Auto-scroll when either:
+    // - we explicitly requested it (we just sent a message), or
+    // - the user is already near the bottom (so incoming messages should slide in)
+    // However, skip auto-scroll during the initial load to avoid jumping to the
+    // bottom when the user first opens the chat.
+    try {
+      if (initialLoadRef.current) {
+        initialLoadRef.current = false
+        return
+      }
+
+      const container = messagesContainerRef.current
+      if (!container) return
+
+      const distanceFromBottom = container.scrollHeight - (container.scrollTop + container.clientHeight)
+      const isNearBottom = distanceFromBottom <= 150
+
+      if (shouldScrollRef.current || isNearBottom) {
+        scrollToBottom()
+        shouldScrollRef.current = false
+        nearBottomRef.current = true
+      } else {
+        nearBottomRef.current = false
+      }
+    } catch (e) {
+      // ignore
+    }
   }, [messages])
 
   const scrollToBottom = () => {
+    // Prefer smooth scrolling but fall back to instant if needed
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
@@ -340,6 +384,15 @@ export default function ChatPage() {
         throw error
       }
       setNewMessage('')
+      // Ensure we scroll to the bottom to show the message we just sent
+      shouldScrollRef.current = true
+      // Also try an immediate scroll to reduce perceived latency
+      setTimeout(() => {
+        try {
+          scrollToBottom()
+        } catch (e) {}
+        shouldScrollRef.current = false
+      }, 150)
     } catch (e: any) {
       console.error('[CHAT] Send message error:', e.message || e)
       toast.error(e.message || 'Failed to send message')
@@ -451,20 +504,19 @@ export default function ChatPage() {
       />
       <div className="flex-1 flex flex-col bg-gradient-to-b from-[#0f1724] to-[#071029]">
         <Header title="Chat" isAuthenticated={isAuthenticated} userEmail={userEmail} />
-        <div className="flex-1 flex overflow-hidden">
+  <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Sidebar with chatrooms */}
           <aside className="w-64 border-r border-white/10 bg-white/5 flex flex-col">
-            <div className="p-4 border-b border-white/10">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold">Chatrooms</h2>
-                <button
-                  onClick={() => setShowCreateRoom(!showCreateRoom)}
-                  className="btn-secondary text-xs px-2 py-1"
-                  title="Create private room"
-                >
-                  +
-                </button>
-              </div>
+            <div className="p-3 border-b border-white/10 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Chatrooms</h2>
+              <button
+                onClick={() => setShowCreateRoom(!showCreateRoom)}
+                className="btn-secondary text-xs px-2 py-1"
+                title="Create private room"
+              >
+                +
+              </button>
+            </div>
               {showCreateRoom && (
                 <div className="mb-3 space-y-2">
                   <input
@@ -485,13 +537,12 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
-            </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {chatrooms.map((room) => (
                 <button
                   key={room.id}
                   onClick={() => joinRoom(room.id)}
-                  className={`w-full text-left p-2 rounded-lg transition-colors ${
+                  className={`w-full text-left p-2 rounded-lg transition-colors flex items-center gap-3 ${
                     activeRoom === room.id
                       ? 'bg-accent/20 text-accent'
                       : 'hover:bg-white/5 text-white/70'
@@ -507,22 +558,26 @@ export default function ChatPage() {
           </aside>
 
           {/* Main chat area */}
-          <div className="flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col min-h-0">
             {activeRoom ? (
               <>
-                {/* Chat header */}
-                <div className="p-4 border-b border-white/10 bg-white/5">
-                  <h3 className="font-semibold">{activeRoomData?.name || 'Chat'}</h3>
-                  <p className="text-xs text-muted">
-                    {isPublicRoom ? 'Public chat - All users can see messages' : 'Private room'}
-                  </p>
-                </div>
+                <div className="w-full">
+                  <div className="max-w-[900px] w-full mx-auto flex-1 flex flex-col" style={{ maxHeight: 'calc(100vh - 72px)' }}>
+                    {/* Chat header */}
+                    <div className="p-4 border-b border-white/10 bg-white/5">
+                      <h3 className="font-semibold">{activeRoomData?.name || 'Chat'}</h3>
+                      <p className="text-xs text-muted">
+                        {isPublicRoom ? 'Public chat - All users can see messages' : 'Private room'}
+                      </p>
+                    </div>
 
-                {/* Messages */}
-                <div
-                  ref={messagesContainerRef}
-                  className="flex-1 overflow-y-auto p-4 space-y-3"
-                >
+                    {/* Messages */}
+                    <div
+                      ref={messagesContainerRef}
+                      className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0"
+                      style={{ WebkitOverflowScrolling: 'touch' }}
+                      onScroll={onMessagesScroll}
+                    >
                   {loading && messages.length === 0 ? (
                     <div className="text-center text-muted">Loading messages...</div>
                   ) : messages.length === 0 ? (
@@ -557,23 +612,25 @@ export default function ChatPage() {
                       </motion.div>
                     ))
                   )}
-                  <div ref={messagesEndRef} />
-                </div>
+                      <div ref={messagesEndRef} />
+                    </div>
 
-                {/* Message input */}
-                <div className="p-4 border-t border-white/10 bg-white/5">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                      placeholder="Type a message..."
-                      className="input-field flex-1"
-                    />
-                    <button onClick={sendMessage} className="btn-primary" disabled={!newMessage.trim()}>
-                      Send
-                    </button>
+                    {/* Message input */}
+                    <div className="p-4 border-t border-white/10 bg-white/5">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newMessage}
+                          onChange={(e) => setNewMessage(e.target.value)}
+                          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                          placeholder="Type a message..."
+                          className="input-field flex-1"
+                        />
+                        <button onClick={sendMessage} className="btn-primary" disabled={!newMessage.trim()}>
+                          Send
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </>

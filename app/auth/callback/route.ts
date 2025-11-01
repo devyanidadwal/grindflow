@@ -5,7 +5,10 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
-  const origin = requestUrl.origin
+  
+  // Get the origin from request headers or fallback to request URL origin
+  const origin = request.headers.get('origin') || requestUrl.origin
+  console.log('Auth callback - Origin:', origin, 'Code:', !!code)
   
   if (code) {
     const response = NextResponse.next({

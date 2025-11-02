@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
@@ -13,7 +13,7 @@ import ModalPortal from '@/components/ui/modal-portal'
 import UpdateUsernameSection from '@/components/settings/UpdateUsernameSection'
 import ManageDocumentsSection from '@/components/settings/ManageDocumentsSection'
 
-export default function Dashboard() {
+function DashboardContent() {
   const searchParams = useSearchParams()
   const [activeView, setActiveView] = useState('home')
   const [showAuth, setShowAuth] = useState(false)
@@ -1181,9 +1181,23 @@ export default function Dashboard() {
             </div>
           </ModalPortal>
         )}
-        {/* Footer removed as requested */}
+         {/* Footer removed as requested */}
+       </div>
+     </div>
+   )
+ }
+
+export default function Dashboard() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="text-center">
+          <div className="text-gray-400">Loading...</div>
+        </div>
       </div>
-    </div>
+    }>
+      <DashboardContent />
+    </Suspense>
   )
 }
 

@@ -223,9 +223,9 @@ export default function ExplorePage() {
     folderStructure[subject][year][degree].push(doc)
   })
 
-  const subjects = Array.from(new Set(publicDocs.map((d) => d.subject).filter(Boolean)))
-  const years = Array.from(new Set(publicDocs.map((d) => d.year).filter(Boolean)))
-  const degrees = Array.from(new Set(publicDocs.map((d) => d.degree).filter(Boolean)))
+  const subjects = Array.from(new Set(publicDocs.map((d) => d.subject).filter((s): s is string => Boolean(s))))
+  const years = Array.from(new Set(publicDocs.map((d) => d.year).filter((y): y is string => Boolean(y))))
+  const degrees = Array.from(new Set(publicDocs.map((d) => d.degree).filter((d): d is string => Boolean(d))))
 
   const toggleFolder = (key: string) => {
     setExpandedFolders((prev) => {
@@ -497,9 +497,9 @@ export default function ExplorePage() {
                   </section>
                 )}
 
-                {(doc.focus_topics?.length || doc.repetitive_topics?.length) && (
+                {((doc.focus_topics && doc.focus_topics.length > 0) || (doc.repetitive_topics && doc.repetitive_topics.length > 0)) && (
                   <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {doc.focus_topics?.length > 0 && (
+                    {doc.focus_topics && doc.focus_topics.length > 0 && (
                       <div className="bg-white/5 rounded-lg p-4 border border-white/10">
                         <h4 className="font-semibold mb-2 text-sm">Focus Topics</h4>
                         <ul className="m-0 pl-5 space-y-1 text-sm">
@@ -509,7 +509,7 @@ export default function ExplorePage() {
                         </ul>
                       </div>
                     )}
-                    {doc.repetitive_topics?.length > 0 && (
+                    {doc.repetitive_topics && doc.repetitive_topics.length > 0 && (
                       <div className="bg-white/5 rounded-lg p-4 border border-white/10">
                         <h4 className="font-semibold mb-2 text-sm">Repetitive Topics</h4>
                         <ul className="m-0 pl-5 space-y-1 text-sm">
@@ -522,7 +522,7 @@ export default function ExplorePage() {
                   </section>
                 )}
 
-                {doc.suggested_plan?.length > 0 && (
+                {doc.suggested_plan && doc.suggested_plan.length > 0 && (
                   <section className="bg-white/5 rounded-lg p-4 border border-white/10">
                     <h4 className="font-semibold mb-2">Suggested Study Plan</h4>
                     <ol className="m-0 pl-5 space-y-1 text-sm">

@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
 
-export default function PublicUploadPage() {
+function PublicUploadContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const docId = searchParams.get('doc')
@@ -318,3 +318,16 @@ export default function PublicUploadPage() {
   )
 }
 
+export default function PublicUploadPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="text-center">
+          <div className="text-gray-400">Loading...</div>
+        </div>
+      </div>
+    }>
+      <PublicUploadContent />
+    </Suspense>
+  )
+}

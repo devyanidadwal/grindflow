@@ -149,10 +149,11 @@ export async function POST(request: NextRequest) {
         if (user) {
           // Ensure a user_profiles row exists to satisfy FK (username required)
           try {
-            const fallbackUsername = user.email || `user-${user.id.substring(0, 8)}`
+            const email = user.email || ''
+            const username = email ? email.split('@')[0] : `user-${user.id.substring(0, 8)}`
             await supabase
               .from('user_profiles')
-              .upsert({ id: user.id, username: fallbackUsername }, { onConflict: 'id' })
+              .upsert({ id: user.id, username }, { onConflict: 'id' })
           } catch (e) {
             console.warn('[API] upsert user_profiles failed (continuing):', (e as any)?.message || e)
           }

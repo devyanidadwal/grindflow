@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import Sidebar from '@/components/Sidebar'
@@ -9,54 +9,40 @@ import Header from '@/components/Header'
 
 export default function PublicUploadPage() {
   const router = useRouter()
-  const [docId, setDocId] = useState<string | null>(null)
-
-  // Read score, keyword, doc id and analysis data from URL params on client only
+  const searchParams = useSearchParams()
+  const docId = searchParams.get('doc')
+  
+  // Read score, keyword, and analysis data from URL params
   useEffect(() => {
-    const applyFromLocation = () => {
-      try {
-        if (typeof window === 'undefined') return
-        const params = new URLSearchParams(window.location.search)
-        const d = params.get('doc')
-        setDocId(d)
-
-        const scoreParam = params.get('score')
-        const keywordParam = params.get('keyword')
-        const verdictParam = params.get('verdict')
-        const rationaleParam = params.get('rationale')
-        const focusTopicsParam = params.get('focus_topics')
-        const repetitiveTopicsParam = params.get('repetitive_topics')
-        const suggestedPlanParam = params.get('suggested_plan')
-
-        if (scoreParam) {
-          const parsed = parseFloat(scoreParam)
-          if (!isNaN(parsed)) setScore(parsed)
-        }
-        if (keywordParam) setAnalysisKeyword(decodeURIComponent(keywordParam))
-
-        if (verdictParam || rationaleParam || focusTopicsParam || repetitiveTopicsParam || suggestedPlanParam) {
-          setAnalysisData({
-            verdict: verdictParam || undefined,
-            rationale: rationaleParam ? decodeURIComponent(rationaleParam) : undefined,
-            focus_topics: focusTopicsParam ? JSON.parse(focusTopicsParam) : undefined,
-            repetitive_topics: repetitiveTopicsParam ? JSON.parse(repetitiveTopicsParam) : undefined,
-            suggested_plan: suggestedPlanParam ? JSON.parse(suggestedPlanParam) : undefined,
-          })
-        }
-      } catch (e) {
-        // ignore malformed params
-      }
+    const scoreParam = searchParams.get('score')
+    const keywordParam = searchParams.get('keyword')
+    const verdictParam = searchParams.get('verdict')
+    const rationaleParam = searchParams.get('rationale')
+    const focusTopicsParam = searchParams.get('focus_topics')
+    const repetitiveTopicsParam = searchParams.get('repetitive_topics')
+    const suggestedPlanParam = searchParams.get('suggested_plan')
+    
+    if (scoreParam) {
+      const parsed = parseFloat(scoreParam)
+      if (!isNaN(parsed)) setScore(parsed)
     }
-
-    applyFromLocation()
-    const onPop = () => applyFromLocation()
-    window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
-  }, [])
+    if (keywordParam) setAnalysisKeyword(decodeURIComponent(keywordParam))
+    
+    if (verdictParam || rationaleParam || focusTopicsParam || repetitiveTopicsParam || suggestedPlanParam) {
+      setAnalysisData({
+        verdict: verdictParam || undefined,
+        rationale: rationaleParam ? decodeURIComponent(rationaleParam) : undefined,
+        focus_topics: focusTopicsParam ? JSON.parse(focusTopicsParam) : undefined,
+        repetitive_topics: repetitiveTopicsParam ? JSON.parse(repetitiveTopicsParam) : undefined,
+        suggested_plan: suggestedPlanParam ? JSON.parse(suggestedPlanParam) : undefined,
+      })
+    }
+  }, [searchParams])
   
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [userEmail, setUserEmail] = useState('')
+  const [userId, setUserId] = useState('')
   const [docName, setDocName] = useState('')
   const [subject, setSubject] = useState('')
   const [unit, setUnit] = useState('')
@@ -76,24 +62,79 @@ export default function PublicUploadPage() {
   useEffect(() => {
     let mounted = true
     // Quick check - don't block render
-    supabase.auth.getSession().then(({ data, error }) => {
+    supabase.auth.getSession().then(async ({ data, error }) => {
       if (!mounted) return
       if (error?.message?.includes('refresh') || error?.message?.includes('Refresh Token')) {
         supabase.auth.signOut().then(() => router.replace('/'))
         return
       }
       if (data?.session) {
+        // Check if user has username
+        const token = data.session.access_token
+        try {
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const { hasUsername } = await res.json()
+            if (!hasUsername) {
+              router.replace('/onboarding')
+              return
+            }
+          } else {
+            router.replace('/onboarding')
+            return
+          }
+        } catch (e) {
+          console.error('[PUBLIC-UPLOAD] Check username error:', e)
+          router.replace('/onboarding')
+          return
+        }
+        
         setIsAuthenticated(true)
-        setUserEmail(data.session.user?.email || '')
+        const email = data.session.user?.email || ''
+        const username = email ? email.split('@')[0] : 'User'
+        setUserEmail(username)
+        setUserId(data.session.user?.id || '')
       } else {
         router.replace('/')
       }
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
       if (!mounted) return
-      setIsAuthenticated(!!session)
-      setUserEmail(session?.user?.email || '')
-      if (!session) router.replace('/')
+      if (session) {
+        // Check if user has username
+        const token = session.access_token
+        try {
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const { hasUsername } = await res.json()
+            if (!hasUsername) {
+              router.replace('/onboarding')
+              return
+            }
+          } else {
+            router.replace('/onboarding')
+            return
+          }
+        } catch (e) {
+          console.error('[PUBLIC-UPLOAD] Check username error:', e)
+          router.replace('/onboarding')
+          return
+        }
+        
+        setIsAuthenticated(true)
+        const email = session.user?.email || ''
+        const username = email ? email.split('@')[0] : 'User'
+        setUserEmail(username)
+        setUserId(session.user?.id || '')
+      } else {
+        setIsAuthenticated(false)
+        setUserEmail('')
+        router.replace('/')
+      }
     })
     return () => { mounted = false; subscription.unsubscribe() }
   }, [router])
@@ -190,7 +231,7 @@ export default function PublicUploadPage() {
         username={userEmail || 'User'}
       />
       <div className="flex-1 flex flex-col bg-gradient-to-b from-[#0f1724] to-[#071029]">
-        <Header title="Share to Public Library" isAuthenticated={isAuthenticated} userEmail={userEmail} />
+        <Header title="Share to Public Library" isAuthenticated={isAuthenticated} userEmail={userEmail} userId={userId || ''} />
         <main className="py-10 px-4">
           <div className="max-w-2xl mx-auto">
             <div className="card">

@@ -21,11 +21,28 @@ export default function AuthCompletePage() {
       try {
         const { data } = await supabase.auth.getSession()
         if (data?.session) {
-          toast.success('Logged in successfully!')
-          // Force a full reload to ensure the client reads the newly stored session
-          // (some browsers / hydration cases may not pick up localStorage session
-          // immediately when using SPA navigation)
-          window.location.href = '/dashboard'
+          // Check if user has username
+          const token = data.session.access_token
+          try {
+            const res = await fetch('/api/user/check-username', {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+            if (res.ok) {
+              const { hasUsername } = await res.json()
+              if (hasUsername) {
+                toast.success('Logged in successfully!')
+                window.location.href = '/dashboard'
+              } else {
+                window.location.href = '/onboarding'
+              }
+            } else {
+              // If check fails, assume onboarding needed
+              window.location.href = '/onboarding'
+            }
+          } catch (e) {
+            // If check fails, assume onboarding needed
+            window.location.href = '/onboarding'
+          }
         } else {
           // proceed to poll for a session if there was an OAuth code
           if (!hasCode) {
@@ -65,16 +82,29 @@ export default function AuthCompletePage() {
       const helperWorked = await tryGetSessionFromUrl()
       console.log('[auth/complete] helperWorked=', helperWorked)
       if (helperWorked) {
-        const { data } = await supabase.auth.getSession()
-        console.log('[auth/complete] after helper getSession ->', data)
-        if (data?.session) {
-          if (!mounted) return
-          setStatus('success')
-          toast.success('Logged in successfully!')
-          // Use a full page navigation to guarantee the dashboard client reads the session
-          window.location.href = '/dashboard'
-          return
-        }
+          const { data } = await supabase.auth.getSession()
+          console.log('[auth/complete] after helper getSession ->', data)
+          if (data?.session) {
+            if (!mounted) return
+            // Check if user has username
+            const token = data.session.access_token
+            try {
+              const res = await fetch('/api/user/check-username', {
+                headers: { Authorization: `Bearer ${token}` },
+              })
+              if (res.ok) {
+                const { hasUsername } = await res.json()
+                setStatus('success')
+                toast.success('Logged in successfully!')
+                window.location.href = hasUsername ? '/dashboard' : '/onboarding'
+              } else {
+                window.location.href = '/onboarding'
+              }
+            } catch (e) {
+              window.location.href = '/onboarding'
+            }
+            return
+          }
       }
 
       const POLL_INTERVAL = 500
@@ -87,9 +117,23 @@ export default function AuthCompletePage() {
           console.log('[auth/complete] poll getSession ->', !!data?.session)
           if (data?.session) {
             if (!mounted) return
-            setStatus('success')
-            toast.success('Logged in successfully!')
-            router.push('/dashboard')
+            // Check if user has username
+            const token = data.session.access_token
+            try {
+              const res = await fetch('/api/user/check-username', {
+                headers: { Authorization: `Bearer ${token}` },
+              })
+              if (res.ok) {
+                const { hasUsername } = await res.json()
+                setStatus('success')
+                toast.success('Logged in successfully!')
+                router.push(hasUsername ? '/dashboard' : '/onboarding')
+              } else {
+                router.push('/onboarding')
+              }
+            } catch (e) {
+              router.push('/onboarding')
+            }
             return
           }
         } catch (e) {

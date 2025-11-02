@@ -6,7 +6,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Check if the route requires authentication
-  const requiresAuth = ['/dashboard'].some(path => pathname.startsWith(path))
+  const requiresAuth = ['/dashboard', '/onboarding'].some(path => pathname.startsWith(path))
   
   let response = NextResponse.next({
     request: {

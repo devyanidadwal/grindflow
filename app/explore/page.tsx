@@ -33,6 +33,7 @@ export default function ExplorePage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [userEmail, setUserEmail] = useState('')
+  const [userId, setUserId] = useState('')
   const [publicDocs, setPublicDocs] = useState<PublicDoc[]>([])
   const [docsLoading, setDocsLoading] = useState(false)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
@@ -42,17 +43,71 @@ export default function ExplorePage() {
   useEffect(() => {
     let mounted = true
     // Quick check
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!mounted) return
       if (data?.session) {
+        // Check if user has username (only if authenticated - explore allows browsing without auth)
+        const token = data.session.access_token
+        try {
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const { hasUsername } = await res.json()
+            if (!hasUsername) {
+              // User is authenticated but no username - redirect to onboarding
+              router.replace('/onboarding')
+              return
+            }
+          }
+        } catch (e) {
+          console.error('[EXPLORE] Check username error:', e)
+          // If check fails and user is authenticated, redirect to onboarding
+          router.replace('/onboarding')
+          return
+        }
+        
         setIsAuthenticated(true)
-        setUserEmail(data.session.user?.email || '')
+        const email = data.session.user?.email || ''
+        const username = email ? email.split('@')[0] : 'User'
+        setUserEmail(username)
+        setUserId(data.session.user?.id || '')
       }
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
       if (!mounted) return
-      setIsAuthenticated(!!session)
-      setUserEmail(session?.user?.email || '')
+      if (session) {
+        // Check if user has username
+        const token = session.access_token
+        try {
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const { hasUsername } = await res.json()
+            if (!hasUsername) {
+              router.replace('/onboarding')
+              return
+            }
+          } else {
+            router.replace('/onboarding')
+            return
+          }
+        } catch (e) {
+          console.error('[EXPLORE] Check username error:', e)
+          router.replace('/onboarding')
+          return
+        }
+        
+        setIsAuthenticated(true)
+        const email = session.user?.email || ''
+        const username = email ? email.split('@')[0] : 'User'
+        setUserEmail(username)
+        setUserId(session.user?.id || '')
+      } else {
+        setIsAuthenticated(false)
+        setUserEmail('')
+      }
     })
     return () => { mounted = false; subscription.unsubscribe() }
   }, [router])
@@ -196,7 +251,7 @@ export default function ExplorePage() {
         username={userEmail || 'User'}
       />
       <div className="flex-1 flex flex-col bg-gradient-to-b from-[#0f1724] to-[#071029]">
-        <Header title="Explore" isAuthenticated={isAuthenticated} userEmail={userEmail} />
+        <Header title="Explore" isAuthenticated={isAuthenticated} userEmail={userEmail} userId={userId || ''} />
         <main className="py-10 px-4">
           <div className="max-w-7xl mx-auto w-full">
             <h1 className="text-3xl font-bold mb-6">Public Library</h1>
@@ -211,7 +266,7 @@ export default function ExplorePage() {
               >
                 <option value="">All Subjects</option>
                 {subjects.map((s) => (
-                  <option key={String(s)} value={s ?? ''}>{s}</option>
+                  <option key={s} value={s}>{s}</option>
                 ))}
               </select>
               <select
@@ -221,7 +276,7 @@ export default function ExplorePage() {
               >
                 <option value="">All Years</option>
                 {years.map((y) => (
-                  <option key={String(y)} value={y ?? ''}>{y}</option>
+                  <option key={y} value={y}>{y}</option>
                 ))}
               </select>
               <select
@@ -231,7 +286,7 @@ export default function ExplorePage() {
               >
                 <option value="">All Degrees</option>
                 {degrees.map((d) => (
-                  <option key={String(d)} value={d ?? ''}>{d}</option>
+                  <option key={d} value={d}>{d}</option>
                 ))}
               </select>
               {(selectedFilters.subject || selectedFilters.year || selectedFilters.degree) && (
@@ -336,7 +391,7 @@ export default function ExplorePage() {
                                                   {doc.analysis_keyword && (
                                                     <span className="text-muted">Keyword: <span className="font-medium">{doc.analysis_keyword}</span></span>
                                                   )}
-                                                  {(doc.verdict || doc.rationale || (Array.isArray(doc.focus_topics) && doc.focus_topics.length > 0)) && (
+                                                  {(doc.verdict || doc.rationale || doc.focus_topics?.length) && (
                                                     <>
                                                       <span className="text-muted">•</span>
                                                       <button
@@ -442,23 +497,23 @@ export default function ExplorePage() {
                   </section>
                 )}
 
-                {((Array.isArray(doc.focus_topics) && doc.focus_topics.length > 0) || (Array.isArray(doc.repetitive_topics) && doc.repetitive_topics.length > 0)) && (
+                {(doc.focus_topics?.length || doc.repetitive_topics?.length) && (
                   <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {Array.isArray(doc.focus_topics) && doc.focus_topics.length > 0 && (
+                    {doc.focus_topics?.length > 0 && (
                       <div className="bg-white/5 rounded-lg p-4 border border-white/10">
                         <h4 className="font-semibold mb-2 text-sm">Focus Topics</h4>
                         <ul className="m-0 pl-5 space-y-1 text-sm">
-                          {(doc.focus_topics || []).map((t, i) => (
+                          {doc.focus_topics.map((t, i) => (
                             <li key={i}>{t}</li>
                           ))}
                         </ul>
                       </div>
                     )}
-                    {Array.isArray(doc.repetitive_topics) && doc.repetitive_topics.length > 0 && (
+                    {doc.repetitive_topics?.length > 0 && (
                       <div className="bg-white/5 rounded-lg p-4 border border-white/10">
                         <h4 className="font-semibold mb-2 text-sm">Repetitive Topics</h4>
                         <ul className="m-0 pl-5 space-y-1 text-sm">
-                          {(doc.repetitive_topics || []).map((t, i) => (
+                          {doc.repetitive_topics.map((t, i) => (
                             <li key={i}>{t}</li>
                           ))}
                         </ul>
@@ -467,11 +522,11 @@ export default function ExplorePage() {
                   </section>
                 )}
 
-                {Array.isArray(doc.suggested_plan) && doc.suggested_plan.length > 0 && (
+                {doc.suggested_plan?.length > 0 && (
                   <section className="bg-white/5 rounded-lg p-4 border border-white/10">
                     <h4 className="font-semibold mb-2">Suggested Study Plan</h4>
                     <ol className="m-0 pl-5 space-y-1 text-sm">
-                      {(doc.suggested_plan || []).map((t, i) => (
+                      {doc.suggested_plan.map((t, i) => (
                         <li key={i}>{t}</li>
                       ))}
                     </ol>

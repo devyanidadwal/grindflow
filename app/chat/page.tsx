@@ -237,10 +237,10 @@ export default function ChatPage() {
       if (publicError || userError) {
         const error = publicError || userError
         // If table doesn't exist or RLS error, just use public room
-        if (error.code === 'PGRST116' || 
+        if (error !== null && (error.code === 'PGRST116' || 
             error.message?.includes('does not exist') || 
             error.message?.includes('Could not find the table') ||
-            error.message?.includes('schema cache')) {
+            error.message?.includes('schema cache'))) {
           console.warn('[CHAT] Chatrooms table does not exist yet. Please run database-schema.sql in Supabase SQL Editor')
           setChatrooms(allRooms)
           return

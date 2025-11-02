@@ -9,27 +9,65 @@ interface SidebarProps {
   activeView: string
   onViewChange: (view: string) => void
   username?: string
-  coins?: number
 }
 
-export default function Sidebar({ activeView, onViewChange, username = 'Devyani', coins = 12.3 }: SidebarProps) {
+export default function Sidebar({ activeView, onViewChange, username = 'Devyani' }: SidebarProps) {
   const [userEmail, setUserEmail] = useState<string>(username)
-  const [userCoins, setUserCoins] = useState<number>(coins)
   const router = useRouter()
 
   useEffect(() => {
     // Non-blocking auth check
-    supabase.auth.getSession().then(({ data }) => {
-      const email = data?.session?.user?.email
-      if (email) {
-        setUserEmail(email)
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (data?.session) {
+        const token = data.session.access_token
+        try {
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const { username: profileUsername } = await res.json()
+            if (profileUsername) {
+              setUserEmail(profileUsername)
+            } else {
+              // Fallback to email username
+              const email = data.session.user?.email || ''
+              const username = email ? email.split('@')[0] : 'User'
+              setUserEmail(username)
+            }
+          }
+        } catch (e) {
+          // Fallback to email username
+          const email = data.session.user?.email || ''
+          const username = email ? email.split('@')[0] : 'User'
+          setUserEmail(username)
+        }
       }
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      const email = session?.user?.email
-      if (email) {
-        setUserEmail(email)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
+      if (session) {
+        const token = session.access_token
+        try {
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const { username: profileUsername } = await res.json()
+            if (profileUsername) {
+              setUserEmail(profileUsername)
+            } else {
+              // Fallback to email username
+              const email = session.user?.email || ''
+              const username = email ? email.split('@')[0] : 'User'
+              setUserEmail(username)
+            }
+          }
+        } catch (e) {
+          // Fallback to email username
+          const email = session.user?.email || ''
+          const username = email ? email.split('@')[0] : 'User'
+          setUserEmail(username)
+        }
       }
     })
 
@@ -142,7 +180,6 @@ export default function Sidebar({ activeView, onViewChange, username = 'Devyani'
           </div>
           <div>
             <div className="text-sm font-medium">{userEmail}</div>
-            <small className="text-xs text-muted">Coins: {userCoins.toFixed(2)}</small>
           </div>
         </div>
         <button onClick={handleLogout} className="btn-ghost text-sm">

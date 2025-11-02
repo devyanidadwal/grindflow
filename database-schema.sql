@@ -1,6 +1,36 @@
 -- Chat Database Schema for GrindFlow
 -- Run this SQL in your Supabase SQL Editor
 
+-- 0. Create user_profiles table (for username storage)
+CREATE TABLE IF NOT EXISTS user_profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  username TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create index on username for faster lookups
+CREATE INDEX IF NOT EXISTS idx_user_profiles_username ON user_profiles(username);
+
+-- Enable RLS for user_profiles
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+
+-- Users can view all profiles (for username lookups)
+CREATE POLICY "Users can view all profiles"
+  ON user_profiles FOR SELECT
+  USING (true);
+
+-- Users can insert their own profile
+CREATE POLICY "Users can insert their own profile"
+  ON user_profiles FOR INSERT
+  WITH CHECK (auth.uid() = id);
+
+-- Users can update their own profile
+CREATE POLICY "Users can update their own profile"
+  ON user_profiles FOR UPDATE
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
+
 -- 1. Create chatrooms table
 CREATE TABLE IF NOT EXISTS chatrooms (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -133,10 +163,49 @@ CREATE POLICY "Users can send messages to accessible rooms"
     )
   );
 
+-- 9. Create notifications table for @mentions
+-- This table stores notifications when users are mentioned in chat
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT 'mention',
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  related_message_id UUID,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  read BOOLEAN DEFAULT false
+);
+
+-- Create indexes for notifications (improves query performance)
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(user_id, read);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+
+-- Enable RLS for notifications
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+
+-- Users can only see their own notifications
+CREATE POLICY "Users can view their own notifications"
+  ON notifications FOR SELECT
+  USING (auth.uid() = user_id);
+
+-- System can create notifications (will use service role key)
+-- This allows the mentions API to create notifications for mentioned users
+CREATE POLICY "Users can receive notifications"
+  ON notifications FOR INSERT
+  WITH CHECK (true);
+
+-- Users can update their own notifications (mark as read)
+CREATE POLICY "Users can update their own notifications"
+  ON notifications FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
 -- Enable Realtime for chat tables (optional - if Realtime is available in your Supabase plan)
 -- If Realtime is not available, the app will automatically use polling as a fallback
 -- Uncomment these lines if you have Realtime enabled:
 -- ALTER PUBLICATION supabase_realtime ADD TABLE chat_messages;
 -- ALTER PUBLICATION supabase_realtime ADD TABLE chatrooms;
 -- ALTER PUBLICATION supabase_realtime ADD TABLE chatroom_members;
+-- ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
 

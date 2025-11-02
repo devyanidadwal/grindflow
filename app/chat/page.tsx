@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
 import { motion } from 'framer-motion'
+import { extractMentions, renderMessageWithMentions } from '@/lib/mentions'
 
 interface Message {
   id: string
@@ -40,38 +41,78 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
-  const shouldScrollRef = useRef(false)
-  const nearBottomRef = useRef(true)
-  const initialLoadRef = useRef(true)
-
-  const onMessagesScroll = () => {
-    const container = messagesContainerRef.current
-    if (!container) return
-    const distanceFromBottom = container.scrollHeight - (container.scrollTop + container.clientHeight)
-    nearBottomRef.current = distanceFromBottom <= 150
-    // If user scrolls manually, we should not auto-scroll anymore
-    if (!nearBottomRef.current) shouldScrollRef.current = false
-  }
   const publicRoomId = 'public'
+  
+  // Mention autocomplete states
+  const [mentionSuggestions, setMentionSuggestions] = useState<Array<{ id: string; username: string }>>([])
+  const [showMentionSuggestions, setShowMentionSuggestions] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
+  const messageInputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     let mounted = true
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!mounted) return
       if (data?.session) {
-        setIsAuthenticated(true)
-        setUserEmail(data.session.user?.email || '')
-        setUserId(data.session.user?.id || '')
+        // Check if user has username
+        const sessionToken = data.session.access_token
+        try {
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${sessionToken}` },
+          })
+          if (res.ok) {
+            const { hasUsername, username: profileUsername } = await res.json()
+            if (!hasUsername) {
+              router.replace('/onboarding')
+              return
+            }
+            // Set username from profile
+            setIsAuthenticated(true)
+            setUserId(data.session.user?.id || '')
+            setUserEmail(profileUsername || data.session.user?.email?.split('@')[0] || 'User')
+          } else {
+            router.replace('/onboarding')
+            return
+          }
+        } catch (e) {
+          console.error('[CHAT] Check username error:', e)
+          router.replace('/onboarding')
+          return
+        }
       } else {
         router.replace('/')
       }
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
       if (!mounted) return
       if (session) {
-        setIsAuthenticated(true)
-        setUserEmail(session.user?.email || '')
-        setUserId(session.user?.id || '')
+        // Check if user has username
+        const sessionToken = session.access_token
+        try {
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${sessionToken}` },
+          })
+          if (res.ok) {
+            const { hasUsername, username: profileUsername } = await res.json()
+            if (!hasUsername) {
+              router.replace('/onboarding')
+              return
+            }
+            // Set username from profile
+            setIsAuthenticated(true)
+            setUserId(session.user?.id || '')
+            setUserEmail(profileUsername || session.user?.email?.split('@')[0] || 'User')
+          } else {
+            router.replace('/onboarding')
+            return
+          }
+        } catch (e) {
+          console.error('[CHAT] Check username error:', e)
+          router.replace('/onboarding')
+          return
+        }
       } else {
         router.replace('/')
       }
@@ -79,17 +120,60 @@ export default function ChatPage() {
     return () => { mounted = false; subscription.unsubscribe() }
   }, [router])
 
+  // Fetch username suggestions when @ is typed
+  useEffect(() => {
+    async function fetchSuggestions() {
+      if (!mentionQuery || mentionQuery.length === 0) {
+        setMentionSuggestions([])
+        setShowMentionSuggestions(false)
+        return
+      }
+
+      try {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const token = sessionData.session?.access_token
+        if (!token) return
+
+        const res = await fetch(`/api/chat/search-usernames?q=${encodeURIComponent(mentionQuery)}&limit=5`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+
+        if (res.ok) {
+          const { usernames } = await res.json()
+          setMentionSuggestions(usernames || [])
+          setShowMentionSuggestions(usernames && usernames.length > 0)
+          setSelectedMentionIndex(0)
+        }
+      } catch (e) {
+        console.error('[CHAT] Fetch suggestions error:', e)
+      }
+    }
+
+    const debounceTimer = setTimeout(fetchSuggestions, 200)
+    return () => clearTimeout(debounceTimer)
+  }, [mentionQuery])
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (showMentionSuggestions && messageInputRef.current) {
+        const target = event.target as Node
+        if (!messageInputRef.current.contains(target)) {
+          setShowMentionSuggestions(false)
+        }
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showMentionSuggestions])
+
   useEffect(() => {
     if (!userId) return
     loadChatrooms()
     // Set public room as default
     setActiveRoom(publicRoomId)
   }, [userId])
-
-  // Reset initial-load flag when switching rooms so we don't auto-scroll on room change
-  useEffect(() => {
-    initialLoadRef.current = true
-  }, [activeRoom])
 
   useEffect(() => {
     if (!activeRoom || !userId) return
@@ -116,37 +200,10 @@ export default function ChatPage() {
   }, [activeRoom, userId])
 
   useEffect(() => {
-    // Auto-scroll when either:
-    // - we explicitly requested it (we just sent a message), or
-    // - the user is already near the bottom (so incoming messages should slide in)
-    // However, skip auto-scroll during the initial load to avoid jumping to the
-    // bottom when the user first opens the chat.
-    try {
-      if (initialLoadRef.current) {
-        initialLoadRef.current = false
-        return
-      }
-
-      const container = messagesContainerRef.current
-      if (!container) return
-
-      const distanceFromBottom = container.scrollHeight - (container.scrollTop + container.clientHeight)
-      const isNearBottom = distanceFromBottom <= 150
-
-      if (shouldScrollRef.current || isNearBottom) {
-        scrollToBottom()
-        shouldScrollRef.current = false
-        nearBottomRef.current = true
-      } else {
-        nearBottomRef.current = false
-      }
-    } catch (e) {
-      // ignore
-    }
+    scrollToBottom()
   }, [messages])
 
   const scrollToBottom = () => {
-    // Prefer smooth scrolling but fall back to instant if needed
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
@@ -180,10 +237,10 @@ export default function ChatPage() {
       if (publicError || userError) {
         const error = publicError || userError
         // If table doesn't exist or RLS error, just use public room
-        if (error && (error.code === 'PGRST116' || 
+        if (error.code === 'PGRST116' || 
             error.message?.includes('does not exist') || 
             error.message?.includes('Could not find the table') ||
-            error.message?.includes('schema cache'))) {
+            error.message?.includes('schema cache')) {
           console.warn('[CHAT] Chatrooms table does not exist yet. Please run database-schema.sql in Supabase SQL Editor')
           setChatrooms(allRooms)
           return
@@ -258,19 +315,34 @@ export default function ChatPage() {
         throw error
       }
 
-      // Fetch user emails for all messages
+      // Fetch usernames for all messages
       const userIds = [...new Set((data || []).map((m: any) => m.user_id))]
-      const emailMap: Record<string, string> = {}
+      const usernameMap: Record<string, string> = {}
       
-      // Get current user email from session
+      // Get current user username from profile
       const { data: sessionData } = await supabase.auth.getSession()
       if (sessionData.session?.user?.id) {
-        emailMap[sessionData.session.user.id] = sessionData.session.user.email || 'You'
+        try {
+          const token = sessionData.session.access_token
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const { username } = await res.json()
+            if (username) {
+              usernameMap[sessionData.session.user.id] = username
+            }
+          }
+        } catch (e) {
+          // Fallback to email username
+          const email = sessionData.session.user.email || ''
+          usernameMap[sessionData.session.user.id] = email ? email.split('@')[0] : 'You'
+        }
       }
 
-      // Fetch other user emails via API (optional - messages already have user_email)
-      const otherUserIds = userIds.filter(id => id !== sessionData.session?.user?.id)
-      if (otherUserIds.length > 0) {
+      // Fetch other usernames via API
+      const allUserIds = userIds.filter(id => !usernameMap[id])
+      if (allUserIds.length > 0) {
         try {
           const token = sessionData.session?.access_token
           const res = await fetch('/api/chat/users', {
@@ -279,25 +351,38 @@ export default function ChatPage() {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({ user_ids: otherUserIds }),
+            body: JSON.stringify({ user_ids: allUserIds }),
           })
           if (res.ok) {
-            const { emails } = await res.json()
-            Object.assign(emailMap, emails)
+            const { usernames } = await res.json()
+            Object.assign(usernameMap, usernames)
           }
         } catch (e) {
-          // Silently fail - we can use user_email from message
+          console.error('[CHAT] Fetch usernames error:', e)
         }
       }
 
-      const formatted = (data || []).map((msg: any) => ({
-        id: msg.id,
-        chatroom_id: msg.chatroom_id,
-        user_id: msg.user_id,
-        user_email: msg.user_email || emailMap[msg.user_id] || 'Unknown',
-        content: msg.content,
-        created_at: msg.created_at,
-      }))
+      const formatted = (data || []).map((msg: any) => {
+        // Get username from map, fallback to message user_email, then to 'Unknown'
+        let displayName = usernameMap[msg.user_id]
+        
+        if (!displayName) {
+          // Fallback: if user_email in message is still email, extract username
+          displayName = msg.user_email || 'Unknown'
+          if (displayName.includes('@')) {
+            displayName = displayName.split('@')[0]
+          }
+        }
+        
+        return {
+          id: msg.id,
+          chatroom_id: msg.chatroom_id,
+          user_id: msg.user_id,
+          user_email: displayName,
+          content: msg.content,
+          created_at: msg.created_at,
+        }
+      })
       setMessages(prev => {
         // Merge with existing messages, avoiding duplicates
         const existingIds = new Set(prev.map(m => m.id))
@@ -328,11 +413,42 @@ export default function ChatPage() {
             filter: `chatroom_id=eq.${roomId}`
           }, 
           async (payload) => {
+            // Fetch username for the new message
+            let displayName = payload.new.user_email || 'User'
+            
+            // If it's an email, try to fetch the actual username
+            if (displayName.includes('@')) {
+              try {
+                const { data: sessionData } = await supabase.auth.getSession()
+                const token = sessionData.session?.access_token
+                if (token) {
+                  const res = await fetch('/api/chat/users', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ user_ids: [payload.new.user_id] }),
+                  })
+                  if (res.ok) {
+                    const { usernames } = await res.json()
+                    displayName = usernames[payload.new.user_id] || displayName.split('@')[0]
+                  } else {
+                    displayName = displayName.split('@')[0]
+                  }
+                } else {
+                  displayName = displayName.split('@')[0]
+                }
+              } catch (e) {
+                displayName = displayName.split('@')[0]
+              }
+            }
+            
             const newMsg: Message = {
               id: payload.new.id,
               chatroom_id: payload.new.chatroom_id,
               user_id: payload.new.user_id,
-              user_email: payload.new.user_email || 'User',
+              user_email: displayName,
               content: payload.new.content,
               created_at: payload.new.created_at,
             }
@@ -360,18 +476,69 @@ export default function ChatPage() {
     }
   }
 
+  function selectMention(username: string) {
+    if (!messageInputRef.current) return
+    
+    const cursorPos = messageInputRef.current.selectionStart || 0
+    const textBefore = newMessage.substring(0, mentionIndex)
+    const textAfter = newMessage.substring(cursorPos)
+    const newText = `${textBefore}@${username} ${textAfter}`
+    
+    setNewMessage(newText)
+    setShowMentionSuggestions(false)
+    setMentionQuery('')
+    
+    // Focus back on input and position cursor after the mention
+    setTimeout(() => {
+      if (messageInputRef.current) {
+        const newCursorPos = mentionIndex + username.length + 2 // @username + space
+        messageInputRef.current.focus()
+        messageInputRef.current.setSelectionRange(newCursorPos, newCursorPos)
+      }
+    }, 0)
+  }
+
   async function sendMessage() {
     if (!newMessage.trim() || !activeRoom || !userId || !userEmail) return
 
+    const messageContent = newMessage.trim()
+    const mentions = extractMentions(messageContent)
+
     try {
-      const { error } = await supabase
+      // Ensure we're using the profile username (userEmail should already be the username from onboarding)
+      // But double-check by fetching it if needed
+      let displayUsername = userEmail
+      
+      // Verify it's actually a username and not an email-derived value
+      if (displayUsername.includes('@')) {
+        // If somehow it's still an email, fetch the actual username
+        try {
+          const { data: sessionData } = await supabase.auth.getSession()
+          const token = sessionData.session?.access_token
+          if (token) {
+            const res = await fetch('/api/user/check-username', {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+            if (res.ok) {
+              const { username } = await res.json()
+              if (username) displayUsername = username
+            }
+          }
+        } catch (e) {
+          // Keep userEmail if fetch fails
+        }
+      }
+
+      const { data: insertedData, error } = await supabase
         .from('chat_messages')
         .insert({
           chatroom_id: activeRoom,
           user_id: userId,
-          user_email: userEmail,
-          content: newMessage.trim(),
+          user_email: displayUsername,
+          content: messageContent,
         })
+        .select('id')
+        .single()
 
       if (error) {
         if (error.code === 'PGRST116' || 
@@ -383,16 +550,34 @@ export default function ChatPage() {
         }
         throw error
       }
-      setNewMessage('')
-      // Ensure we scroll to the bottom to show the message we just sent
-      shouldScrollRef.current = true
-      // Also try an immediate scroll to reduce perceived latency
-      setTimeout(() => {
+
+      // Handle mentions if any
+      if (mentions.length > 0 && insertedData?.id) {
         try {
-          scrollToBottom()
-        } catch (e) {}
-        shouldScrollRef.current = false
-      }, 150)
+          const { data: sessionData } = await supabase.auth.getSession()
+          const token = sessionData.session?.access_token
+          if (token) {
+            await fetch('/api/chat/mentions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                mentions,
+                messageId: insertedData.id,
+                roomName: activeRoomData?.name || activeRoom,
+                fromUsername: displayUsername,
+              }),
+            })
+          }
+        } catch (e) {
+          console.error('[CHAT] Mention notification error:', e)
+          // Don't fail message sending if mention notification fails
+        }
+      }
+
+      setNewMessage('')
     } catch (e: any) {
       console.error('[CHAT] Send message error:', e.message || e)
       toast.error(e.message || 'Failed to send message')
@@ -503,20 +688,21 @@ export default function ChatPage() {
         username={userEmail || 'User'}
       />
       <div className="flex-1 flex flex-col bg-gradient-to-b from-[#0f1724] to-[#071029]">
-        <Header title="Chat" isAuthenticated={isAuthenticated} userEmail={userEmail} />
-  <div className="flex-1 flex overflow-hidden min-h-0">
+        <Header title="Chat" isAuthenticated={isAuthenticated} userEmail={userEmail} userId={userId} />
+        <div className="flex-1 flex overflow-hidden">
           {/* Sidebar with chatrooms */}
           <aside className="w-64 border-r border-white/10 bg-white/5 flex flex-col">
-            <div className="p-3 border-b border-white/10 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Chatrooms</h2>
-              <button
-                onClick={() => setShowCreateRoom(!showCreateRoom)}
-                className="btn-secondary text-xs px-2 py-1"
-                title="Create private room"
-              >
-                +
-              </button>
-            </div>
+            <div className="p-4 border-b border-white/10">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold">Chatrooms</h2>
+                <button
+                  onClick={() => setShowCreateRoom(!showCreateRoom)}
+                  className="btn-secondary text-xs px-2 py-1"
+                  title="Create private room"
+                >
+                  +
+                </button>
+              </div>
               {showCreateRoom && (
                 <div className="mb-3 space-y-2">
                   <input
@@ -537,12 +723,13 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
+            </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {chatrooms.map((room) => (
                 <button
                   key={room.id}
                   onClick={() => joinRoom(room.id)}
-                  className={`w-full text-left p-2 rounded-lg transition-colors flex items-center gap-3 ${
+                  className={`w-full text-left p-2 rounded-lg transition-colors ${
                     activeRoom === room.id
                       ? 'bg-accent/20 text-accent'
                       : 'hover:bg-white/5 text-white/70'
@@ -558,26 +745,22 @@ export default function ChatPage() {
           </aside>
 
           {/* Main chat area */}
-          <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 flex flex-col">
             {activeRoom ? (
               <>
-                <div className="w-full">
-                  <div className="max-w-[900px] w-full mx-auto flex-1 flex flex-col" style={{ maxHeight: 'calc(100vh - 72px)' }}>
-                    {/* Chat header */}
-                    <div className="p-4 border-b border-white/10 bg-white/5">
-                      <h3 className="font-semibold">{activeRoomData?.name || 'Chat'}</h3>
-                      <p className="text-xs text-muted">
-                        {isPublicRoom ? 'Public chat - All users can see messages' : 'Private room'}
-                      </p>
-                    </div>
+                {/* Chat header */}
+                <div className="p-4 border-b border-white/10 bg-white/5">
+                  <h3 className="font-semibold">{activeRoomData?.name || 'Chat'}</h3>
+                  <p className="text-xs text-muted">
+                    {isPublicRoom ? 'Public chat - All users can see messages' : 'Private room'}
+                  </p>
+                </div>
 
-                    {/* Messages */}
-                    <div
-                      ref={messagesContainerRef}
-                      className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0"
-                      style={{ WebkitOverflowScrolling: 'touch' }}
-                      onScroll={onMessagesScroll}
-                    >
+                {/* Messages */}
+                <div
+                  ref={messagesContainerRef}
+                  className="flex-1 overflow-y-auto p-4 space-y-3"
+                >
                   {loading && messages.length === 0 ? (
                     <div className="text-center text-muted">Loading messages...</div>
                   ) : messages.length === 0 ? (
@@ -604,7 +787,17 @@ export default function ChatPage() {
                               {msg.user_email}
                             </div>
                           )}
-                          <div className="text-sm">{msg.content}</div>
+                          <div className="text-sm">
+                            {renderMessageWithMentions(msg.content).map((part, idx) => 
+                              part.type === 'mention' ? (
+                                <span key={idx} className="text-accent font-medium">
+                                  {part.content}
+                                </span>
+                              ) : (
+                                <span key={idx}>{part.content}</span>
+                              )
+                            )}
+                          </div>
                           <div className="text-xs text-muted mt-1">
                             {new Date(msg.created_at).toLocaleTimeString()}
                           </div>
@@ -612,25 +805,99 @@ export default function ChatPage() {
                       </motion.div>
                     ))
                   )}
-                      <div ref={messagesEndRef} />
-                    </div>
+                  <div ref={messagesEndRef} />
+                </div>
 
-                    {/* Message input */}
-                    <div className="p-4 border-t border-white/10 bg-white/5">
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={newMessage}
-                          onChange={(e) => setNewMessage(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                          placeholder="Type a message..."
-                          className="input-field flex-1"
-                        />
-                        <button onClick={sendMessage} className="btn-primary" disabled={!newMessage.trim()}>
-                          Send
-                        </button>
-                      </div>
+                {/* Message input */}
+                <div className="p-4 border-t border-white/10 bg-white/5">
+                  <div className="flex gap-2 relative">
+                    <div className="relative flex-1">
+                      <textarea
+                        ref={messageInputRef}
+                        placeholder="Type a message... Use @ to mention someone"
+                        value={newMessage}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          setNewMessage(value)
+                          
+                          // Detect @mention pattern
+                          const cursorPos = e.target.selectionStart || 0
+                          const textBeforeCursor = value.substring(0, cursorPos)
+                          const mentionMatch = textBeforeCursor.match(/@(\w*)$/)
+                          
+                          if (mentionMatch) {
+                            const query = mentionMatch[1]
+                            setMentionQuery(query)
+                            setMentionIndex(cursorPos - query.length - 1) // Position of @
+                            setShowMentionSuggestions(true)
+                          } else {
+                            setShowMentionSuggestions(false)
+                            setMentionQuery('')
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (showMentionSuggestions && mentionSuggestions.length > 0) {
+                            if (e.key === 'ArrowDown') {
+                              e.preventDefault()
+                              setSelectedMentionIndex((prev) => 
+                                prev < mentionSuggestions.length - 1 ? prev + 1 : 0
+                              )
+                            } else if (e.key === 'ArrowUp') {
+                              e.preventDefault()
+                              setSelectedMentionIndex((prev) => 
+                                prev > 0 ? prev - 1 : mentionSuggestions.length - 1
+                              )
+                            } else if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault()
+                              if (mentionSuggestions[selectedMentionIndex]) {
+                                selectMention(mentionSuggestions[selectedMentionIndex].username)
+                              } else {
+                                sendMessage()
+                              }
+                            } else if (e.key === 'Escape') {
+                              setShowMentionSuggestions(false)
+                            }
+                          } else if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            sendMessage()
+                          }
+                        }}
+                        onClick={() => {
+                          // Hide suggestions when clicking outside the mention area
+                          if (showMentionSuggestions) {
+                            const cursorPos = messageInputRef.current?.selectionStart || 0
+                            const textBeforeCursor = newMessage.substring(0, cursorPos)
+                            const mentionMatch = textBeforeCursor.match(/@(\w*)$/)
+                            if (!mentionMatch) {
+                              setShowMentionSuggestions(false)
+                            }
+                          }
+                        }}
+                        className="input-field w-full text-sm resize-none"
+                        rows={1}
+                        style={{ minHeight: '40px', maxHeight: '120px' }}
+                      />
+                      
+                      {/* Mention suggestions dropdown */}
+                      {showMentionSuggestions && mentionSuggestions.length > 0 && (
+                        <div className="absolute bottom-full left-0 mb-2 w-full max-w-xs bg-card border border-white/10 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+                          {mentionSuggestions.map((user, idx) => (
+                            <button
+                              key={user.id}
+                              onClick={() => selectMention(user.username)}
+                              className={`w-full text-left px-4 py-2 hover:bg-white/10 transition-colors ${
+                                idx === selectedMentionIndex ? 'bg-accent/20 text-accent' : ''
+                              }`}
+                            >
+                              <div className="text-sm font-medium">@{user.username}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
+                    <button onClick={sendMessage} className="btn-primary" disabled={!newMessage.trim()}>
+                      Send
+                    </button>
                   </div>
                 </div>
               </>

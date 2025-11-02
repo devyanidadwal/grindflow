@@ -23,23 +23,23 @@ export async function POST(req: NextRequest) {
     const { data: auth } = await supabase.auth.getUser(token)
     if (!auth?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    // Fetch user emails using Admin API
-    const emailMap: Record<string, string> = {}
+    // Fetch usernames from user_profiles table
+    const usernameMap: Record<string, string> = {}
     
-    // Use Supabase Admin API to get user emails
-    const adminSupabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    })
+    if (user_ids.length > 0) {
+      const { data: profiles, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('id, username')
+        .in('id', user_ids)
 
-    // Note: Admin API for fetching users might require direct database query
-    // For now, we'll use a workaround - store emails when messages are sent
-    // Or create a profiles table. For MVP, let's return empty and handle client-side
-    // The client will show "User" for unknown users which is acceptable for MVP
+      if (!profileError && profiles) {
+        profiles.forEach((profile) => {
+          usernameMap[profile.id] = profile.username
+        })
+      }
+    }
 
-    return NextResponse.json({ emails: emailMap })
+    return NextResponse.json({ usernames: usernameMap })
   } catch (e: any) {
     console.error('[CHAT] Users API error:', e)
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })

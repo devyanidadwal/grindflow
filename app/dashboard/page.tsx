@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
 import { supabase } from '@/lib/supabase'
@@ -10,9 +10,11 @@ import SoftCard from '@/components/ui/soft-card'
 import PrettyFlow from '@/components/ui/pretty-flow'
 import { motion } from 'framer-motion'
 import ModalPortal from '@/components/ui/modal-portal'
+import UpdateUsernameSection from '@/components/settings/UpdateUsernameSection'
+import ManageDocumentsSection from '@/components/settings/ManageDocumentsSection'
 
 export default function Dashboard() {
-  const router = useRouter()
+  const searchParams = useSearchParams()
   const [activeView, setActiveView] = useState('home')
   const [showAuth, setShowAuth] = useState(false)
   const [authEmail, setAuthEmail] = useState('')
@@ -29,6 +31,7 @@ export default function Dashboard() {
   const [detailsDocId, setDetailsDocId] = useState<string>('')
   const [authStatus, setAuthStatus] = useState('Not signed in')
   const [userEmail, setUserEmail] = useState<string>('')
+  const [userId, setUserId] = useState<string>('')
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   // Quiz states
@@ -50,77 +53,95 @@ export default function Dashboard() {
   const [showStudyflowAnalysis, setShowStudyflowAnalysis] = useState(false)
   const [showUploadToPublicPopup, setShowUploadToPublicPopup] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
 
-  // Read view from URL query parameter on mount and when history changes
+  // Read view from URL query parameter on mount and when it changes
   useEffect(() => {
-    const applyFromLocation = () => {
-      try {
-        const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
-        const viewParam = params.get('view')
-        if (viewParam && ['home', 'my-docs', 'quiz', 'studyflow', 'settings'].includes(viewParam)) {
-          setActiveView(viewParam)
-        }
-      } catch (e) {
-        // ignore
-      }
+    const viewParam = searchParams.get('view')
+    if (viewParam && ['home', 'my-docs', 'quiz', 'studyflow', 'settings'].includes(viewParam)) {
+      setActiveView(viewParam)
     }
-
-    applyFromLocation()
-    const onPop = () => applyFromLocation()
-    window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
-  }, [])
+  }, [searchParams])
 
   useEffect(() => {
     let mounted = true
-    let isInitialMount = true
 
     // Quick synchronous check first
-    supabase.auth.getSession().then(({ data, error }) => {
+    supabase.auth.getSession().then(async ({ data, error }) => {
       if (!mounted) return
       if (data?.session) {
-        const email = data.session.user.email || 'User'
+        // Check if user has username, redirect to onboarding if not
+        const token = data.session.access_token
+        try {
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const { hasUsername, username: profileUsername } = await res.json()
+            if (!hasUsername) {
+              router.replace('/onboarding')
+              return
+            }
+            // Use the profile username or fallback to email username
+            const email = data.session.user.email || ''
+            const displayUsername = profileUsername || (email ? email.split('@')[0] : 'User')
         setIsAuthenticated(true)
-        setUserEmail(email)
-        setAuthStatus(`Signed in as ${email}`)
-        if (!isInitialMount && !window.location.pathname.includes('/dashboard')) {
-          router.replace('/dashboard?view=home')
+            setUserEmail(displayUsername)
+            setUserId(data.session.user.id)
+            setAuthStatus(`Signed in as ${displayUsername}`)
+          } else {
+            // If check fails, redirect to onboarding to be safe
+            router.replace('/onboarding')
+          }
+        } catch (e) {
+          console.error('[DASHBOARD] Check username error:', e)
+          router.replace('/onboarding')
         }
       } else if (error?.message?.includes('refresh') || error?.message?.includes('Refresh Token')) {
         supabase.auth.signOut().then(() => router.replace('/'))
+      } else {
+        // No session, redirect to home
+        router.replace('/')
       }
-      isInitialMount = false
     })
 
     // Set up auth state listener for real-time updates
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return
-      console.log('Auth state change:', event, !!session)
-      
-        if (event === 'SIGNED_OUT' || !session) {
+        if (!mounted) return
+        
+      if (event === 'SIGNED_OUT' || !session) {
         setIsAuthenticated(false)
         setUserEmail('')
         setAuthStatus('Not signed in')
         docsLoadedRef.current = false // Reset so docs reload on next login
         router.replace('/')
       } else if (session) {
-        const email = session.user.email || 'User'
-        setIsAuthenticated(true)
-        setUserEmail(email)
-        setAuthStatus(`Signed in as ${email}`)
-        docsLoadedRef.current = false // Reset so docs load for new session
-        setActiveView('home')
-
-        // Redirect explicitly when a fresh sign-in happens (ensures Google OAuth returns land on dashboard)
-        if (event === 'SIGNED_IN') {
-          toast.success('Logged in successfully!')
-          // Force full navigation so the freshly-stored session is picked up
-          window.location.href = '/dashboard'
+        // Check if user has username
+        const token = session.access_token
+        try {
+          const res = await fetch('/api/user/check-username', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (res.ok) {
+            const { hasUsername, username: profileUsername } = await res.json()
+            if (!hasUsername) {
+              router.replace('/onboarding')
+              return
+            }
+            // Use the profile username or fallback to email username
+            const email = session.user.email || ''
+            const displayUsername = profileUsername || (email ? email.split('@')[0] : 'User')
+          setIsAuthenticated(true)
+            setUserEmail(displayUsername)
+            setUserId(session.user.id)
+            setAuthStatus(`Signed in as ${displayUsername}`)
+            docsLoadedRef.current = false // Reset so docs load for new session
         } else {
-          // For other session events, ensure consistency by navigating to dashboard if not already there
-          if (!window.location.pathname.includes('/dashboard')) {
-            window.location.href = '/dashboard'
-          }
+            router.replace('/onboarding')
+        }
+        } catch (e) {
+          console.error('[DASHBOARD] Check username error:', e)
+          router.replace('/onboarding')
         }
       }
     })
@@ -133,7 +154,20 @@ export default function Dashboard() {
 
   // Email/password sign-in removed in favor of Google OAuth
 
-  // Authentication handlers will be implemented here
+  const handleGoogleSignIn = async () => {
+    try {
+      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : undefined
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo },
+      })
+      if (error) throw error
+      // For OAuth, Supabase will redirect; as a guard, show a toast
+      toast.info('Redirecting to Google…')
+    } catch (e: any) {
+      toast.error(`Google sign-in failed: ${e.message || e}`)
+    }
+  }
 
   // Email/password sign-up removed
 
@@ -304,7 +338,7 @@ export default function Dashboard() {
     if ((activeView === 'my-docs' || activeView === 'quiz' || activeView === 'studyflow') && isAuthenticated) {
       if (!docsLoadedRef.current || activeView === 'my-docs') {
         docsLoadedRef.current = true
-        loadDocuments()
+      loadDocuments()
       }
     }
   }, [activeView, isAuthenticated])
@@ -337,13 +371,20 @@ export default function Dashboard() {
           }}
           isAuthenticated={isAuthenticated}
           userEmail={userEmail}
+          userId={userId}
         />
         <main className="p-7 flex-1 max-w-[1100px] mx-auto w-full">
           {(activeView === 'auth' || showAuth) && (
             <section className="fade visible flex flex-col items-center justify-center gap-[18px] min-h-[80vh]">
               <div className="card">
-                <h3 className="mt-0 mb-4 text-xl font-semibold">Sign In</h3>
+                <h3 className="mt-0 mb-4 text-xl font-semibold">Continue with Google</h3>
                 <p className="mb-2 text-sm">{authStatus}</p>
+                <div className="mt-1">
+                  <button onClick={handleGoogleSignIn} className="btn-secondary inline-flex items-center gap-2">
+                    <svg width="16" height="16" viewBox="0 0 533.5 544.3" aria-hidden="true"><path fill="#4285F4" d="M533.5 278.4c0-18.6-1.7-37-5.2-54.8H272.1v103.8h147c-6.3 34.1-25.4 63-54.2 82.3v68h87.5c51.2-47.2 81.1-116.8 81.1-199.3z"/><path fill="#34A853" d="M272.1 544.3c73.4 0 135.3-24.3 180.4-66.1l-87.5-68c-24.3 16.3-55.3 26.1-92.9 26.1-71.3 0-131.8-48-153.5-112.4H28.7v70.7C73.3 486.4 166.5 544.3 272.1 544.3z"/><path fill="#FBBC05" d="M118.6 323.9c-10.8-31.9-10.8-66.4 0-98.3V154.9H28.7c-38.3 76.3-38.3 167.8 0 244.1l89.9-75.1z"/><path fill="#EA4335" d="M272.1 106.6c39.8-.6 78.1 14.3 107.1 41.9l79.8-79.8C404.9 25.2 340.6-.2 272.1 0 166.5 0 73.3 57.9 28.7 154.9l89.9 70.7c21.7-64.5 82.2-112.4 153.5-119z"/></svg>
+                    Continue with Google
+                  </button>
+                </div>
                 <div className="mt-3">
                   <button onClick={handleSignOut} className="btn-ghost">Sign Out</button>
                 </div>
@@ -351,17 +392,7 @@ export default function Dashboard() {
             </section>
           )}
 
-          {(!isAuthenticated && activeView !== 'auth') && (
-            <section className="fade visible flex flex-col items-center justify-center gap-[18px] min-h-[80vh]">
-              <div className="card">
-                <h3 className="mt-0 mb-4 text-xl font-semibold">Please Sign In</h3>
-                <p className="mb-2 text-sm">Sign in to access this feature</p>
-                <button onClick={() => setActiveView('auth')} className="btn-primary">Sign In</button>
-              </div>
-            </section>
-          )}
-
-          {activeView === 'home' && isAuthenticated && (
+          {activeView === 'home' && (
             <section className="fade visible flex flex-col items-center justify-center gap-[18px] min-h-[80vh]">
               <SoftCard>
                 <h3 className="mt-0 mb-4 text-xl font-semibold">Upload Document</h3>
@@ -566,9 +597,9 @@ export default function Dashboard() {
                     {quizSelectedDocId && (
                       <div className="mt-2 flex items-center gap-2 flex-wrap">
                         <div className="inline-flex items-center gap-2 text-[13px] text-eaf0ff bg-white/5 border border-white/10 rounded-full px-3 py-1">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-                          <span className="truncate max-w-[220px]">{documents.find(d => d.id === quizSelectedDocId)?.file_name || quizSelectedDocId}</span>
-                          <button type="button" onClick={() => setQuizSelectedDocId('')} className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1" aria-label="Clear selected document">×</button>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+                        <span className="truncate max-w-[220px]">{documents.find(d => d.id === quizSelectedDocId)?.file_name || quizSelectedDocId}</span>
+                        <button type="button" onClick={() => setQuizSelectedDocId('')} className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1" aria-label="Clear selected document">×</button>
                         </div>
                         {documents.find(d => d.id === quizSelectedDocId)?.publicUrl && (
                           <a
@@ -635,7 +666,7 @@ export default function Dashboard() {
                           if (err?.name === 'AbortError') {
                             toast.error('Quiz generation timed out. Please try again or add keywords.')
                           } else {
-                            toast.error(err?.message || 'Quiz generation failed')
+                          toast.error(err?.message || 'Quiz generation failed')
                           }
                         } finally {
                           setQuizLoading(false)
@@ -815,11 +846,11 @@ export default function Dashboard() {
                     </button>
                     {studyflowSelectedDocId && (
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="inline-flex items-center gap-2 text-[13px] text-eaf0ff bg-white/5 border border-white/10 rounded-full px-3 py-1">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-                          <span className="truncate max-w-[260px]">{documents.find(d => d.id === studyflowSelectedDocId)?.file_name || studyflowSelectedDocId}</span>
-                          <button type="button" onClick={() => setStudyflowSelectedDocId('')} className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1" aria-label="Clear selected document">×</button>
-                        </span>
+                      <span className="inline-flex items-center gap-2 text-[13px] text-eaf0ff bg-white/5 border border-white/10 rounded-full px-3 py-1">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+                        <span className="truncate max-w-[260px]">{documents.find(d => d.id === studyflowSelectedDocId)?.file_name || studyflowSelectedDocId}</span>
+                        <button type="button" onClick={() => setStudyflowSelectedDocId('')} className="ml-1 rounded-full bg-white/10 hover:bg-white/20 px-1" aria-label="Clear selected document">×</button>
+                      </span>
                         {documents.find(d => d.id === studyflowSelectedDocId)?.publicUrl && (
                           <a
                             href={documents.find(d => d.id === studyflowSelectedDocId)?.publicUrl || '#'}
@@ -1027,10 +1058,84 @@ export default function Dashboard() {
           )}
 
           {activeView === 'settings' && (
-            <section className="fade visible flex flex-col items-center justify-start gap-[18px] min-h-[80vh]">
+            <section className="fade visible overflow-y-auto flex flex-col gap-[18px] max-w-4xl mx-auto w-full" style={{ maxHeight: 'calc(100vh - 140px)' }}>
+              {/* Profile Settings */}
               <div className="card">
-                <h3 className="mt-0 mb-4 text-xl font-semibold">Settings</h3>
-                <p className="text-muted">Profile and preferences coming soon.</p>
+                <h3 className="mt-0 mb-6 text-xl font-semibold">Profile Settings</h3>
+                <UpdateUsernameSection userEmail={userEmail} />
+              </div>
+
+              {/* Document Management */}
+              <div className="card">
+                <h3 className="mt-0 mb-6 text-xl font-semibold">Manage Your Documents</h3>
+                <ManageDocumentsSection 
+                  documents={documents}
+                  docsLoading={docsLoading}
+                  deletingIds={deletingIds}
+                  onDelete={async (id: string) => {
+                    try {
+                      setDeletingIds((s) => ({ ...s, [id]: true }))
+                      const { data: sessionData } = await supabase.auth.getSession()
+                      const token = sessionData.session?.access_token
+                      if (!token) throw new Error('Not authenticated')
+
+                      const res = await fetch(`/api/documents?id=${id}`, {
+                        method: 'DELETE',
+                        headers: { Authorization: `Bearer ${token}` },
+                      })
+                      if (!res.ok) {
+                        const text = await res.text()
+                        throw new Error(text || 'Failed to delete document')
+                      }
+                      toast.success('Document deleted')
+                      loadDocuments()
+                    } catch (err: any) {
+                      toast.error(err?.message || 'Delete failed')
+                    } finally {
+                      setDeletingIds((s) => { const n = { ...s }; delete n[id]; return n })
+                    }
+                  }}
+                  onView={(doc) => {
+                    if (doc.publicUrl) {
+                      window.open(doc.publicUrl, '_blank')
+                    } else {
+                      toast.error('Document URL not available')
+                    }
+                  }}
+                />
+              </div>
+
+              {/* Account Actions */}
+              <div className="card">
+                <h3 className="mt-0 mb-6 text-xl font-semibold">Account Actions</h3>
+                <div className="space-y-4">
+                  {isAuthenticated ? (
+                    <button
+                      onClick={handleSignOut}
+                      className="btn-secondary w-full text-left flex items-center justify-between"
+                    >
+                      <span>Sign Out</span>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <polyline points="16 17 21 12 16 7" />
+                        <line x1="21" y1="12" x2="9" y2="12" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleGoogleSignIn}
+                      className="btn-primary w-full flex items-center justify-center gap-2"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                      </svg>
+                      Continue with Google
+                    </button>
+                  )}
+                </div>
               </div>
             </section>
           )}

@@ -126,12 +126,16 @@ export default function Sidebar({ activeView, onViewChange, username = 'Devyani'
   return (
     <aside className="w-[260px] p-6 flex flex-col gap-[18px] bg-gradient-to-b from-white/2 to-white/1 border-r border-white/3 min-h-screen">
       <div className="flex gap-3 items-center">
-        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-accent to-[#9ad4ff] flex items-center justify-center font-bold text-[#071129] text-lg">
-          GF
-        </div>
+        <div className="w-18 h-14 rounded-xl bg-gradient-to-br from-accent to-[#9ad4ff] overflow-hidden">
+  <img 
+    src="/49081F90-0AE7-46AD-BAF4-D21147D31B37_1_201_a.jpeg" 
+    alt="Logo" 
+    className="w-full h-full "
+  />
+</div>
         <div>
-          <h1 className="m-0 text-lg font-semibold">GrindFlow</h1>
-          <p className="m-0 text-xs text-muted">Peer-powered study notes</p>
+        <h1 className="m-0 text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white to-white/90 bg-clip-text">GrindFlow</h1>
+<p className="m-0 text-[10px] text-muted/70 tracking-wide uppercase font-medium">Peer-powered study notes</p>
         </div>
       </div>
 

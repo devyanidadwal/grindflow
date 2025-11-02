@@ -96,7 +96,6 @@ Instead of guessing, students can now:
   - Document scoring and feedback
   - Quiz generation
   - Study flow analysis
-- **Stripe** - Payment processing (optional)
 
 ### Development Tools
 ... (347 lines left)
@@ -201,7 +200,6 @@ Instead of guessing, students can now:
   - Document scoring and feedback
   - Quiz generation
   - Study flow analysis
-- **Stripe** - Payment processing (optional)
 
 ### Development Tools
 - **pdf-parse** - PDF text extraction
@@ -218,7 +216,6 @@ Before you begin, ensure you have:
 - **npm** or **yarn** package manager
 - **Supabase Account** ([Sign up](https://supabase.com))
 - **Google Cloud Project** with Gemini API enabled ([Get API Key](https://ai.google.dev/))
-- (Optional) **Stripe Account** for payment features
 
 ---
 
@@ -258,11 +255,6 @@ SUPABASE_STORAGE_BUCKET=documents
 # Google Gemini AI
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-2.5-flash
-
-# Optional: Stripe (for payments)
-# Get these from https://dashboard.stripe.com/apikeys
-STRIPE_SECRET_KEY=your_stripe_secret_key_here
-NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=your_stripe_publishable_key_here
 
 # Server Configuration
 PORT=3000
@@ -330,7 +322,6 @@ grindflow/
 │   ├── Sidebar.tsx               # Navigation sidebar
 │   ├── Header.tsx                # Page header
 │   ├── Footer.tsx                # Footer component
-│   └── PaymentModal.tsx          # Payment modal
 ├── lib/                          # Utility libraries
 │   ├── supabase.ts               # Supabase client setup
 │   ├── supabase-server.ts        # Server-side Supabase
@@ -439,8 +430,6 @@ grindflow/
 | `SUPABASE_STORAGE_BUCKET` | ✅ | Storage bucket name for documents |
 | `GEMINI_API_KEY` | ✅ | Google Gemini API key |
 | `GEMINI_MODEL` | ❌ | Gemini model name (default: `gemini-2.5-flash`) |
-| `STRIPE_SECRET_KEY` | ❌ | Stripe secret key (for payments) |
-| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | ❌ | Stripe publishable key |
 
 ### Google Gemini Models
 

@@ -25,9 +25,18 @@ export async function GET(req: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    if (error && error.code !== 'PGRST116') {
+    // Handle case where table doesn't exist or row doesn't exist
+    if (error) {
+      if (error.code === 'PGRST116' || 
+          error.message?.includes('does not exist') || 
+          error.message?.includes('Could not find the table') ||
+          error.message?.includes('schema cache')) {
+        // Table doesn't exist yet - return false (user needs to set username)
+        return NextResponse.json({ hasUsername: false, username: null })
+      }
       console.error('[API] Check username error:', error)
-      return NextResponse.json({ error: 'Database error' }, { status: 500 })
+      // For other errors, still return false to allow user to set username
+      return NextResponse.json({ hasUsername: false, username: null })
     }
 
     const hasUsername = !!profile?.username

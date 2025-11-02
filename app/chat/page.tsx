@@ -675,7 +675,7 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar
         activeView="chat"
         onViewChange={(view) => {
@@ -687,12 +687,12 @@ export default function ChatPage() {
         }}
         username={userEmail || 'User'}
       />
-      <div className="flex-1 flex flex-col bg-gradient-to-b from-[#0f1724] to-[#071029]">
+      <div className="flex-1 flex flex-col bg-gradient-to-b from-[#0f1724] to-[#071029] h-screen overflow-hidden">
         <Header title="Chat" isAuthenticated={isAuthenticated} userEmail={userEmail} userId={userId} />
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Sidebar with chatrooms */}
-          <aside className="w-64 border-r border-white/10 bg-white/5 flex flex-col">
-            <div className="p-4 border-b border-white/10">
+          <aside className="w-64 border-r border-white/10 bg-white/5 flex flex-col min-w-0">
+            <div className="p-4 border-b border-white/10 flex-shrink-0">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-lg font-semibold">Chatrooms</h2>
                 <button
@@ -724,7 +724,7 @@ export default function ChatPage() {
                 </div>
               )}
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
               {chatrooms.map((room) => (
                 <button
                   key={room.id}
@@ -745,11 +745,11 @@ export default function ChatPage() {
           </aside>
 
           {/* Main chat area */}
-          <div className="flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col min-w-0">
             {activeRoom ? (
               <>
                 {/* Chat header */}
-                <div className="p-4 border-b border-white/10 bg-white/5">
+                <div className="p-4 border-b border-white/10 bg-white/5 flex-shrink-0">
                   <h3 className="font-semibold">{activeRoomData?.name || 'Chat'}</h3>
                   <p className="text-xs text-muted">
                     {isPublicRoom ? 'Public chat - All users can see messages' : 'Private room'}
@@ -759,7 +759,7 @@ export default function ChatPage() {
                 {/* Messages */}
                 <div
                   ref={messagesContainerRef}
-                  className="flex-1 overflow-y-auto p-4 space-y-3"
+                  className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0"
                 >
                   {loading && messages.length === 0 ? (
                     <div className="text-center text-muted">Loading messages...</div>
@@ -808,8 +808,8 @@ export default function ChatPage() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* Message input */}
-                <div className="p-4 border-t border-white/10 bg-white/5">
+                {/* Message input - Fixed at bottom */}
+                <div className="p-4 border-t border-white/10 bg-white/5 flex-shrink-0">
                   <div className="flex gap-2 relative">
                     <div className="relative flex-1">
                       <textarea

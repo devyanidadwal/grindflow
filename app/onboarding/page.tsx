@@ -41,20 +41,31 @@ export default function OnboardingPage() {
       }
 
       const token = sessionData.session.access_token
-      const res = await fetch('/api/user/check-username', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
+      
+      try {
+        const res = await fetch('/api/user/check-username', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
 
-      if (res.ok) {
-        const { hasUsername } = await res.json()
-        if (hasUsername) {
-          // User already has username, go to dashboard
-          router.replace('/dashboard')
-          return
+        if (res.ok) {
+          const data = await res.json()
+          const { hasUsername } = data
+          if (hasUsername) {
+            // User already has username, go to dashboard
+            router.replace('/dashboard')
+            return
+          }
+        } else {
+          // If API returns error, still allow user to set username
+          console.warn('[ONBOARDING] Check username API returned error:', res.status)
         }
+      } catch (fetchError) {
+        // Network error or fetch failed - allow user to continue anyway
+        console.error('[ONBOARDING] Fetch error:', fetchError)
       }
+      
       setChecking(false)
 
       // Generate suggestions based on email
@@ -168,13 +179,19 @@ export default function OnboardingPage() {
         className="card max-w-md w-full"
       >
         <div className="text-center mb-8">
-        <div className="w-18 h-14 rounded-xl bg-gradient-to-br from-accent to-[#9ad4ff] overflow-hidden">
-  <img 
-    src="/49081F90-0AE7-46AD-BAF4-D21147D31B37_1_201_a.jpeg" 
-    alt="Logo" 
-    className="w-full h-full "
-  />
-</div>
+          <div className="flex justify-center mb-4">
+            <div className="w-26 h-24 rounded-xl bg-gradient-to-br from-accent to-[#9ad4ff] overflow-hidden relative">
+              <img 
+                src="/49081F90-0AE7-46AD-BAF4-D21147D31B37_1_201_a.jpeg" 
+                alt="Logo" 
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  // Hide image on error, show placeholder instead
+                  e.currentTarget.style.display = 'none'
+                }}
+              />
+            </div>
+          </div>
           <h1 className="text-3xl font-bold mb-2">Welcome to GrindFlow!</h1>
           <p className="text-muted">Choose a unique username to get started</p>
         </div>

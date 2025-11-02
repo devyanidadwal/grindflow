@@ -168,9 +168,13 @@ export default function OnboardingPage() {
         className="card max-w-md w-full"
       >
         <div className="text-center mb-8">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-accent to-[#9ad4ff] flex items-center justify-center font-bold text-[#071129] text-3xl mx-auto mb-4">
-            GF
-          </div>
+        <div className="w-18 h-14 rounded-xl bg-gradient-to-br from-accent to-[#9ad4ff] overflow-hidden">
+  <img 
+    src="/49081F90-0AE7-46AD-BAF4-D21147D31B37_1_201_a.jpeg" 
+    alt="Logo" 
+    className="w-full h-full "
+  />
+</div>
           <h1 className="text-3xl font-bold mb-2">Welcome to GrindFlow!</h1>
           <p className="text-muted">Choose a unique username to get started</p>
         </div>

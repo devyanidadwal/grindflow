@@ -11,8 +11,8 @@ interface SidebarProps {
   username?: string
 }
 
-export default function Sidebar({ activeView, onViewChange, username = 'Devyani' }: SidebarProps) {
-  const [userEmail, setUserEmail] = useState<string>(username)
+export default function Sidebar({ activeView, onViewChange, username }: SidebarProps) {
+  const [userEmail, setUserEmail] = useState<string>(username || "User")
   const router = useRouter()
 
   useEffect(() => {

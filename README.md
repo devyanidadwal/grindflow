@@ -4,6 +4,8 @@
 
 Peer‑powered study notes platform built with Next.js, TypeScript, Tailwind, and Supabase.
 
+
+
 <p>
   <a href="https://github.com/puravbhatt0504/grindflow"><img alt="Repo" src="https://img.shields.io/badge/GitHub-grindflow-24292f?logo=github&logoColor=white"></a>
   <img alt="Next.js" src="https://img.shields.io/badge/Next.js-14-black?logo=nextdotjs">

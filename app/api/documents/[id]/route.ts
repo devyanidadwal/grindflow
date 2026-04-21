@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { db } from '@/lib/db'
+import { documents } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
 export async function DELETE(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  // Prefer path param; fall back to query (?id=) or JSON body
   let documentId = ''
   try {
     const p = await context.params
@@ -36,38 +38,25 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     const user = auth?.user
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    // Get the document row to know storage_path; ensure ownership
-    const { data: rows, error: selErr } = await supabase
-      .from('documents')
-      .select('id, storage_path, user_id')
-      .eq('id', documentId)
-      .single()
+    const [doc] = await db
+      .select({ id: documents.id, storagePath: documents.storagePath, userId: documents.userId })
+      .from(documents)
+      .where(eq(documents.id, documentId))
+      .limit(1)
 
-    if (selErr || !rows) return NextResponse.json({ error: selErr?.message || 'Not found' }, { status: 404 })
-    if (rows.user_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (doc.userId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const storagePath = rows.storage_path as string
+    const storagePath = doc.storagePath
 
-    // Delete from storage first (ignore if missing)
     const { error: remErr } = await supabase.storage.from(bucketName).remove([storagePath])
     const removedFromStorage = !remErr
-    if (remErr) {
-      // continue; maybe file already gone
-      console.warn('[DELETE] storage remove warning:', remErr.message)
-    }
+    if (remErr) console.warn('[DELETE] storage remove warning:', remErr.message)
 
-    // Delete DB row
-    const { error: delErr } = await supabase
-      .from('documents')
-      .delete()
-      .eq('id', documentId)
-
-    if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 })
+    await db.delete(documents).where(eq(documents.id, documentId))
 
     return NextResponse.json({ success: true, removedFromStorage })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }
 }
-
-

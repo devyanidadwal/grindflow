@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import pdfParse from 'pdf-parse'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { db } from '@/lib/db'
+import { documents, documentsText } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -27,30 +30,28 @@ export async function POST(req: NextRequest) {
     const user = auth?.user
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { data: doc, error: selErr } = await supabase
-      .from('documents')
-      .select('id, user_id, storage_path, file_name')
-      .eq('id', id)
-      .single()
+    const [doc] = await db
+      .select({ id: documents.id, userId: documents.userId, storagePath: documents.storagePath, fileName: documents.fileName })
+      .from(documents)
+      .where(eq(documents.id, id))
+      .limit(1)
 
-    if (selErr || !doc) return NextResponse.json({ error: selErr?.message || 'Not found' }, { status: 404 })
-    if (doc.user_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (doc.userId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     // Prefer cached extracted text when available
     let text = ''
     try {
-      const { data: cached } = await supabase
-        .from('documents_text')
-        .select('text')
-        .eq('document_id', doc.id)
-        .single()
-      if (cached?.text) {
-        text = cached.text
-      }
+      const [cached] = await db
+        .select({ text: documentsText.text })
+        .from(documentsText)
+        .where(eq(documentsText.documentId, doc.id))
+        .limit(1)
+      if (cached?.text) text = cached.text
     } catch {}
 
     if (!text) {
-      const { data: fileData, error: dlErr } = await supabase.storage.from(bucketName).download(doc.storage_path)
+      const { data: fileData, error: dlErr } = await supabase.storage.from(bucketName).download(doc.storagePath)
       if (dlErr || !fileData) return NextResponse.json({ error: dlErr?.message || 'Download failed' }, { status: 500 })
 
       const arrayBuffer = await fileData.arrayBuffer()
@@ -59,9 +60,13 @@ export async function POST(req: NextRequest) {
       text = parsed.text || ''
 
       try {
-        await supabase
-          .from('documents_text')
-          .upsert({ document_id: doc.id, text, extracted_at: new Date().toISOString() }, { onConflict: 'document_id' })
+        await db
+          .insert(documentsText)
+          .values({ documentId: doc.id, text, extractedAt: new Date().toISOString() })
+          .onConflictDoUpdate({
+            target: documentsText.documentId,
+            set: { text, extractedAt: new Date().toISOString() },
+          })
       } catch {}
     }
 
@@ -121,7 +126,7 @@ export async function POST(req: NextRequest) {
     const numQuestions = FAST_MODE ? 6 : 10
     const system = `You are a quiz generator. Given academic text, create a high-quality multiple-choice quiz. Return strict JSON only with ${numQuestions} concise questions, each with 4 options and the correct option index.`
 
-    const prompt = `Document: ${doc.file_name}\nFocus topic/keywords: "${keyword || 'General'}"\n--- Begin Extracted Text (truncated) ---\n${text}\n--- End Extracted Text ---\n\nReturn STRICT JSON only:\n{\n  "questions": [\n    {\n      "question": string,\n      "options": [string, string, string, string],\n      "correctIndex": number // 0..3\n    }\n  ]\n}`
+    const prompt = `Document: ${doc.fileName}\nFocus topic/keywords: "${keyword || 'General'}"\n--- Begin Extracted Text (truncated) ---\n${text}\n--- End Extracted Text ---\n\nReturn STRICT JSON only:\n{\n  "questions": [\n    {\n      "question": string,\n      "options": [string, string, string, string],\n      "correctIndex": number // 0..3\n    }\n  ]\n}`
 
     let output = ''
     // Short timeout and HTTP fallback with smaller prompt
@@ -146,7 +151,7 @@ export async function POST(req: NextRequest) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [
-              { role: 'user', parts: [{ text: `${system}\n\nDocument: ${doc.file_name}\nKeywords: ${keyword || 'General'}\n---\n${smaller}` }] }
+              { role: 'user', parts: [{ text: `${system}\n\nDocument: ${doc.fileName}\nKeywords: ${keyword || 'General'}\n---\n${smaller}` }] }
             ],
           }),
           signal: controller.signal,
@@ -218,7 +223,7 @@ export async function POST(req: NextRequest) {
     if (questions.length === 0) {
       try {
         const broader = originalNormalized.slice(0, FAST_MODE ? 9000 : 14000)
-        const retryPrompt = `Document: ${doc.file_name}\nFocus topic/keywords: "${keyword || 'General'}"\n--- Begin Extracted Text (truncated) ---\n${broader}\n--- End Extracted Text ---\n\nReturn STRICT JSON only:\n{\n  "questions": [\n    {\n      "question": string,\n      "options": [string, string, string, string],\n      "correctIndex": number // 0..3\n    }\n  ]\n}`
+        const retryPrompt = `Document: ${doc.fileName}\nFocus topic/keywords: "${keyword || 'General'}"\n--- Begin Extracted Text (truncated) ---\n${broader}\n--- End Extracted Text ---\n\nReturn STRICT JSON only:\n{\n  "questions": [\n    {\n      "question": string,\n      "options": [string, string, string, string],\n      "correctIndex": number // 0..3\n    }\n  ]\n}`
         let retryOutput = ''
         try {
           const timed = new Promise<string>((resolve, reject) => {

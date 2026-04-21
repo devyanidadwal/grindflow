@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { db } from '@/lib/db'
+import { userProfiles } from '@/lib/db/schema'
+import { ilike } from 'drizzle-orm'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -14,45 +17,23 @@ export async function GET(req: NextRequest) {
     const query = searchParams.get('q') || ''
     const limit = parseInt(searchParams.get('limit') || '10', 10)
 
+    // Auth still via Supabase — will be replaced by Clerk in Phase 2
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
-
     const { data: auth } = await supabase.auth.getUser(token)
     if (!auth?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    // Fetch usernames from user_profiles
-    let queryBuilder = supabase
-      .from('user_profiles')
-      .select('id, username')
+    // DB query now via Drizzle against Neon
+    const profiles = await db
+      .select({ id: userProfiles.id, username: userProfiles.username })
+      .from(userProfiles)
+      .where(query ? ilike(userProfiles.username, `${query}%`) : undefined)
       .limit(limit)
 
-    // If query is provided, filter usernames that start with query
-    if (query && query.length > 0) {
-      queryBuilder = queryBuilder.ilike('username', `${query}%`)
-    }
-
-    const { data: profiles, error } = await queryBuilder
-
-    if (error) {
-      // If table doesn't exist, return empty array
-      if (error.code === 'PGRST116' || 
-          error.message?.includes('does not exist') ||
-          error.message?.includes('Could not find the table')) {
-        return NextResponse.json({ usernames: [] })
-      }
-      throw error
-    }
-
-    const usernames = (profiles || []).map(p => ({
-      id: p.id,
-      username: p.username,
-    }))
-
-    return NextResponse.json({ usernames })
+    return NextResponse.json({ usernames: profiles })
   } catch (e: any) {
     console.error('[SEARCH-USERNAMES] Error:', e)
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }
 }
-

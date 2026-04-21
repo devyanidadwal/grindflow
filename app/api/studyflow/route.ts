@@ -3,6 +3,9 @@ import { createClient } from '@supabase/supabase-js'
 import pdfParse from 'pdf-parse'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeForPrompt, buildShortText } from '@/lib/text'
+import { db } from '@/lib/db'
+import { documents, documentsText } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -31,31 +34,31 @@ export async function POST(req: NextRequest) {
     const user = auth?.user
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { data: doc, error: selErr } = await supabase
-      .from('documents')
-      .select('id, user_id, storage_path, file_name')
-      .eq('id', id)
-      .single()
+    const [doc] = await db
+      .select({ id: documents.id, userId: documents.userId, storagePath: documents.storagePath, fileName: documents.fileName })
+      .from(documents)
+      .where(eq(documents.id, id))
+      .limit(1)
 
-    if (selErr || !doc) return NextResponse.json({ error: selErr?.message || 'Not found' }, { status: 404 })
-    if (doc.user_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (doc.userId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     // Load cached text if available; else parse and cache
     let text = ''
     let shortText = ''
     try {
-      const { data: cached } = await supabase
-        .from('documents_text')
-        .select('text, normalized_text, short_text')
-        .eq('document_id', doc.id)
-        .single()
+      const [cached] = await db
+        .select({ text: documentsText.text, normalized_text: documentsText.normalizedText, short_text: documentsText.shortText })
+        .from(documentsText)
+        .where(eq(documentsText.documentId, doc.id))
+        .limit(1)
       if (cached?.short_text) shortText = cached.short_text
       if (cached?.text) text = cached.text
       if (!shortText && cached?.normalized_text) shortText = buildShortText(cached.normalized_text, 12000)
     } catch {}
 
     if (!text) {
-      const { data: fileData, error: dlErr } = await supabase.storage.from(bucketName).download(doc.storage_path)
+      const { data: fileData, error: dlErr } = await supabase.storage.from(bucketName).download(doc.storagePath)
       if (dlErr || !fileData) return NextResponse.json({ error: dlErr?.message || 'Download failed' }, { status: 500 })
 
       const arrayBuffer = await fileData.arrayBuffer()
@@ -66,16 +69,24 @@ export async function POST(req: NextRequest) {
       try {
         const normalized = normalizeForPrompt(text)
         shortText = buildShortText(normalized, 12000)
-        await supabase
-          .from('documents_text')
-          .upsert({ document_id: doc.id, text, normalized_text: normalized, short_text: shortText, extracted_at: new Date().toISOString() }, { onConflict: 'document_id' })
+        await db
+          .insert(documentsText)
+          .values({ documentId: doc.id, text, normalizedText: normalized, shortText, extractedAt: new Date().toISOString() })
+          .onConflictDoUpdate({
+            target: documentsText.documentId,
+            set: { text, normalizedText: normalized, shortText, extractedAt: new Date().toISOString() },
+          })
       } catch {}
     }
 
     if (!shortText && text) {
       const normalized = normalizeForPrompt(text)
       shortText = buildShortText(normalized, 12000)
-      try { await supabase.from('documents_text').update({ normalized_text: normalized, short_text: shortText }).eq('document_id', doc.id) } catch {}
+      try {
+        await db.update(documentsText)
+          .set({ normalizedText: normalized, shortText })
+          .where(eq(documentsText.documentId, doc.id))
+      } catch {}
     }
 
     if (!geminiApiKey) {
@@ -151,7 +162,7 @@ export async function POST(req: NextRequest) {
 
     let prompt = ''
     if (type === 'diagram') {
-      prompt = `Document: ${doc.file_name}\n--- Begin Extracted Text ---\n${promptText}\n--- End Extracted Text ---\n\nAnalyze this entire document and create a FLOW STATE DIAGRAM:
+      prompt = `Document: ${doc.fileName}\n--- Begin Extracted Text ---\n${promptText}\n--- End Extracted Text ---\n\nAnalyze this entire document and create a FLOW STATE DIAGRAM:
    - Create a visual ASCII/text diagram showing:
      * Main topics as nodes
      * Connections/arrows showing dependencies (use -> or →)
@@ -174,7 +185,7 @@ Return JSON with this exact key:
 
 Make the flowDiagram visually clear with proper formatting. Ensure all quotes inside the string are escaped with \".`
     } else if (type === 'analysis') {
-      prompt = `Document: ${doc.file_name}\n--- Begin Extracted Text ---\n${promptText}\n--- End Extracted Text ---\n\nAnalyze this entire document and generate a FLOW STATE ANALYSIS:
+      prompt = `Document: ${doc.fileName}\n--- Begin Extracted Text ---\n${promptText}\n--- End Extracted Text ---\n\nAnalyze this entire document and generate a FLOW STATE ANALYSIS:
    - Identify the main topics and subtopics
    - Map out the learning progression (which concepts build on others)
    - Highlight prerequisites and dependencies
@@ -192,7 +203,7 @@ Return JSON with this exact key:
 
 Make the flowAnalysis comprehensive (500-1000 words). Ensure all quotes inside the string are escaped with \".`
     } else {
-      prompt = `Document: ${doc.file_name}\n--- Begin Extracted Text ---\n${promptText}\n--- End Extracted Text ---\n\nAnalyze this entire document and generate:
+      prompt = `Document: ${doc.fileName}\n--- Begin Extracted Text ---\n${promptText}\n--- End Extracted Text ---\n\nAnalyze this entire document and generate:
 
 1. FLOW STATE ANALYSIS:
    - Identify the main topics and subtopics

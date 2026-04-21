@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { db } from '@/lib/db'
+import { documents } from '@/lib/db/schema'
+import { eq, desc } from 'drizzle-orm'
 
 let BUCKET_PUBLIC_CACHE: { known: boolean; isPublic: boolean; checkedAt: number } = {
   known: false,
@@ -14,10 +17,7 @@ export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization')
     const token = authHeader?.replace('Bearer ', '') || ''
-
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
@@ -25,19 +25,18 @@ export async function GET(request: NextRequest) {
 
     const { data: auth } = await supabase.auth.getUser(token)
     const user = auth?.user
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { data, error } = await supabase
-      .from('documents')
-      .select('id, file_name, storage_path, created_at')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const rows = await db
+      .select({
+        id: documents.id,
+        file_name: documents.fileName,
+        storage_path: documents.storagePath,
+        created_at: documents.createdAt,
+      })
+      .from(documents)
+      .where(eq(documents.userId, user.id))
+      .orderBy(desc(documents.createdAt))
 
     const bucketName = process.env.SUPABASE_STORAGE_BUCKET || 'documents'
     let isPublic = BUCKET_PUBLIC_CACHE.isPublic
@@ -50,14 +49,14 @@ export async function GET(request: NextRequest) {
     }
 
     const rowsWithUrls = await Promise.all(
-      (data || []).map(async (row: any) => {
+      rows.map(async (row: any) => {
         if (isPublic) {
           const { data: urlData } = supabase.storage.from(bucketName).getPublicUrl(row.storage_path)
           return { ...row, publicUrl: urlData?.publicUrl || null, bucket: bucketName }
         }
         const { data: signed } = await supabase.storage
           .from(bucketName)
-          .createSignedUrl(row.storage_path, 60 * 60) // 1 hour
+          .createSignedUrl(row.storage_path, 60 * 60)
         return { ...row, publicUrl: signed?.signedUrl || null, bucket: bucketName }
       })
     )
@@ -71,5 +70,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }
 }
-
-

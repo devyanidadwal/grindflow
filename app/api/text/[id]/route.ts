@@ -1,38 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { normalizeForPrompt, buildShortText } from '@/lib/text'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+import { db } from '@/lib/db'
+import { documentsText } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
+    const [row] = await db
+      .select({
+        text: documentsText.text,
+        normalized_text: documentsText.normalizedText,
+        short_text: documentsText.shortText,
+      })
+      .from(documentsText)
+      .where(eq(documentsText.documentId, id))
+      .limit(1)
 
-    const { data, error } = await supabase
-      .from('documents_text')
-      .select('text, normalized_text, short_text')
-      .eq('document_id', id)
-      .single()
+    if (!row) return NextResponse.json({ status: 'missing', short_text: '' })
 
-    if (error) return NextResponse.json({ status: 'missing', short_text: '', error: error.message })
-
-    let normalized = data?.normalized_text || ''
-    let shortText = data?.short_text || ''
-    const text = data?.text || ''
+    let normalized = row.normalized_text || ''
+    let shortText = row.short_text || ''
+    const text = row.text || ''
 
     if (!normalized && text) normalized = normalizeForPrompt(text)
     if (!shortText && normalized) shortText = buildShortText(normalized, 12000)
 
-    return NextResponse.json({ status: shortText ? 'ready' : (text ? 'partial' : 'missing'), length: (shortText || text).length || 0, short_text: shortText })
+    return NextResponse.json({
+      status: shortText ? 'ready' : (text ? 'partial' : 'missing'),
+      length: (shortText || text).length || 0,
+      short_text: shortText,
+    })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }
 }
-
-

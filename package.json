@@ -19,11 +19,13 @@
     "@types/react-dom": "^19.2.2",
     "autoprefixer": "^10.4.21",
     "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
     "framer-motion": "^12.23.24",
     "motion": "^11.15.0",
     "next": "^16.1.1",
     "pdf-parse": "^1.1.4",
     "postcss": "^8.5.6",
+    "postgres": "^3.4.9",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "sonner": "^2.0.7",
@@ -32,6 +34,8 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "@types/pdf-parse": "^1.1.5"
+    "@types/pdf-parse": "^1.1.5",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10"
   }
 }

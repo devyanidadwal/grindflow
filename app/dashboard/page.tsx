@@ -7,6 +7,7 @@ import Header from '@/components/Header'
 import { useUser, useClerk } from '@clerk/nextjs'
 import { toast } from 'sonner'
 import { uploadFiles } from '@/lib/uploadthing'
+import { apiFetch } from '@/lib/api-fetch'
 import SoftCard from '@/components/ui/soft-card'
 import PrettyFlow from '@/components/ui/pretty-flow'
 import { motion } from 'framer-motion'
@@ -194,31 +195,22 @@ function DashboardContent() {
   async function analyzeDocument(id: string) {
     try {
       setAnalyzingIds((s) => ({ ...s, [id]: true }))
-      const res = await fetch('/api/analyze', {
+      const data = await apiFetch<{ result?: any }>('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, context: analysisQuery }),
       })
-      if (!res.ok) {
-        let msg = 'Failed'
-        try { const j = await res.json(); msg = j?.error || msg } catch {}
-        throw new Error(msg)
-      }
-      const data = await res.json()
-      const r = data?.result
+      if (!data) return
+      const r = data.result
       if (r?.score != null) {
         setScores((s) => ({ ...s, [id]: { score: r.score, verdict: r.verdict || '', rationale: r.rationale, focus_topics: r.focus_topics, repetitive_topics: r.repetitive_topics, suggested_plan: r.suggested_plan } }))
         toast.success(`Score: ${r.score}`)
-        if (r.score >= 80) {
-          setShowUploadToPublicPopup(id)
-        }
+        if (r.score >= 80) setShowUploadToPublicPopup(id)
       } else {
         toast.info('Analysis complete, but no score returned')
       }
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error('[ANALYZE] error', e)
-      toast.error(`Analyze failed: ${(e as any)?.message || ''}`)
     } finally {
       setAnalyzingIds((s) => { const n = { ...s }; delete n[id]; return n })
     }

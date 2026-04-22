@@ -1,19 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pdfParse from 'pdf-parse'
-import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeForPrompt, buildShortText } from '@/lib/text'
 import { db } from '@/lib/db'
 import { documents, documentsText } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireUser } from '@/lib/auth'
-
-const geminiApiKey = process.env.GEMINI_API_KEY || ''
-const defaultModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+import { checkAiRateLimit, rateLimitHeaders } from '@/lib/rate-limit'
+import { callGemini, GeminiUnavailableError } from '@/lib/gemini'
 
 export async function POST(req: NextRequest) {
   try {
     const userId = await requireUser()
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const rl = checkAiRateLimit(userId, 'studyflow')
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Slow down and try again in a moment.' },
+        { status: 429, headers: rateLimitHeaders(rl) }
+      )
+    }
 
     const body = await req.json()
     const { id, type = 'both' } = body || {}
@@ -77,71 +83,14 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    if (!geminiApiKey) {
-      return NextResponse.json({ error: 'Gemini API key missing on server' }, { status: 500 })
-    }
-
-    const genAI = new GoogleGenerativeAI(geminiApiKey)
-    const candidateModels = Array.from(new Set([
-      defaultModel,
-      'gemini-2.5-flash',
-      'gemini-1.5-pro',
-      'gemini-pro',
-    ].filter(Boolean)))
-
-    async function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
-
-    async function callGeminiWithRetries(systemPrompt: string, userPrompt: string): Promise<string> {
-      const backoffs = [500, 1000, 2000, 4000]
-      for (const modelName of candidateModels) {
-        // Try SDK with retries
-        for (let attempt = 0; attempt < backoffs.length; attempt++) {
-          try {
-            const sdkModel = genAI.getGenerativeModel({ model: modelName })
-            const res = await sdkModel.generateContent([systemPrompt, userPrompt])
-            const text = res.response.text()
-            if (text) return text
-          } catch (err: any) {
-            const msg = String(err?.message || '')
-            if (attempt < backoffs.length - 1 && (/overloaded|resource.*exhausted|rate|429|unavailable|503/i.test(msg))) {
-              await sleep(backoffs[attempt])
-              continue
-            }
-            // fallthrough to HTTP
-          }
-          // HTTP fallback with same attempt index
-          try {
-            const httpRes = await fetch(`https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=` + encodeURIComponent(geminiApiKey), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [ { role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] } ],
-              }),
-            })
-            if (httpRes.ok) {
-              const data = await httpRes.json()
-              const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
-              if (text) return text
-            } else {
-              const txt = await httpRes.text()
-              if (attempt < backoffs.length - 1 && (/overloaded|resource.*exhausted|rate|429|unavailable|503/i.test(txt))) {
-                await sleep(backoffs[attempt])
-                continue
-              }
-            }
-          } catch (httpErr: any) {
-            const msg = String(httpErr?.message || '')
-            if (attempt < backoffs.length - 1 && (/overloaded|resource.*exhausted|rate|429|unavailable|503/i.test(msg))) {
-              await sleep(backoffs[attempt])
-              continue
-            }
-          }
-        }
-      }
-      throw new Error('Gemini temporarily overloaded. Please retry in a moment.')
-    }
-
     const FAST_MODE = (process.env.FAST_MODE ?? '1') === '1'
+    const callGeminiWithRetries = (systemPrompt: string, userPrompt: string) =>
+      callGemini(systemPrompt, userPrompt, {
+        timeoutMs: FAST_MODE ? 22_000 : 28_000,
+        maxAttempts: 3,
+        models: ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+      })
+
     const baseText = shortText || normalizeForPrompt(text)
     const maxChars = FAST_MODE ? 12000 : 25000
     const promptText = baseText.length > maxChars ? baseText.slice(0, maxChars) + '\n... [truncated]' : baseText
@@ -227,7 +176,15 @@ Return JSON with these exact keys:
 Make the flowAnalysis comprehensive (500-1000 words) and the flowDiagram visually clear with proper formatting. Ensure all quotes inside strings are escaped with \".`
     }
 
-    const output = await callGeminiWithRetries(system, prompt)
+    let output: string
+    try {
+      output = await callGeminiWithRetries(system, prompt)
+    } catch (e: any) {
+      if (e instanceof GeminiUnavailableError) {
+        return NextResponse.json({ error: e.message }, { status: 503, headers: rateLimitHeaders(rl) })
+      }
+      throw e
+    }
 
     // Clean up output - remove markdown code blocks if present
     let cleanedOutput = output.trim()
@@ -340,17 +297,17 @@ Make the flowAnalysis comprehensive (500-1000 words) and the flowDiagram visuall
     if (type === 'diagram') {
       const flowDiagram = typeof json.flowDiagram === 'string' ? json.flowDiagram : String(json.flowDiagram || '')
       const unescapedDiagram = flowDiagram.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r')
-      return NextResponse.json({ id: doc.id, flowDiagram: unescapedDiagram })
+      return NextResponse.json({ id: doc.id, flowDiagram: unescapedDiagram }, { headers: rateLimitHeaders(rl) })
     } else if (type === 'analysis') {
       const flowAnalysis = typeof json.flowAnalysis === 'string' ? json.flowAnalysis : String(json.flowAnalysis || '')
       const unescapedAnalysis = flowAnalysis.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r')
-      return NextResponse.json({ id: doc.id, flowAnalysis: unescapedAnalysis })
+      return NextResponse.json({ id: doc.id, flowAnalysis: unescapedAnalysis }, { headers: rateLimitHeaders(rl) })
     } else {
       let flowAnalysis = typeof json.flowAnalysis === 'string' ? json.flowAnalysis : String(json.flowAnalysis || '')
       let flowDiagram = typeof json.flowDiagram === 'string' ? json.flowDiagram : String(json.flowDiagram || '')
       flowAnalysis = flowAnalysis.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r')
       flowDiagram = flowDiagram.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r')
-      return NextResponse.json({ id: doc.id, flowAnalysis, flowDiagram })
+      return NextResponse.json({ id: doc.id, flowAnalysis, flowDiagram }, { headers: rateLimitHeaders(rl) })
     }
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })

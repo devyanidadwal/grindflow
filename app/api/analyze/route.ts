@@ -1,19 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pdfParse from 'pdf-parse'
-import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeForPrompt, buildShortText } from '@/lib/text'
 import { db } from '@/lib/db'
 import { documents, documentsText, documentsMetadata } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireUser } from '@/lib/auth'
-
-const geminiApiKey = process.env.GEMINI_API_KEY || ''
-const defaultModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+import { checkAiRateLimit, rateLimitHeaders } from '@/lib/rate-limit'
+import { callGemini, GeminiUnavailableError } from '@/lib/gemini'
 
 export async function POST(req: NextRequest) {
   try {
     const userId = await requireUser()
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const rl = checkAiRateLimit(userId, 'analyze')
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Slow down and try again in a moment.' },
+        { status: 429, headers: rateLimitHeaders(rl) }
+      )
+    }
 
     const body = await req.json()
     const { id, context } = body || {}
@@ -77,13 +83,6 @@ export async function POST(req: NextRequest) {
     const maxChars = 18000
     if (promptText.length > maxChars) promptText = promptText.slice(0, maxChars) + '\n... [truncated]'
 
-    if (!geminiApiKey) {
-      return NextResponse.json({ error: 'Gemini API key missing on server' }, { status: 500 })
-    }
-
-    const genAI = new GoogleGenerativeAI(geminiApiKey)
-    let model = genAI.getGenerativeModel({ model: defaultModel })
-
     const system = `You are an academic document rater. Score a PDF from 0 to 100 based on how well it serves the user's stated purpose. Consider coverage, accuracy, organization, clarity, depth, recency (if relevant), and usefulness.
 Return STRICT JSON with keys only:
 {
@@ -97,31 +96,17 @@ Return STRICT JSON with keys only:
 
     const prompt = `User purpose/context: "${context || 'General study'}"\nDocument: ${doc.fileName}\n--- Begin Extracted Text (truncated) ---\n${promptText}\n--- End Extracted Text ---\nRespond with JSON only.`
 
-    let output = ''
+    let output: string
     try {
-      const result = await model.generateContent([system, prompt])
-      output = result.response.text()
-    } catch (sdkErr: any) {
-      try {
-        const httpModel = defaultModel || 'gemini-pro'
-        const httpRes = await fetch(`https://generativelanguage.googleapis.com/v1/models/${httpModel}:generateContent?key=` + encodeURIComponent(geminiApiKey), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: `${system}\n\n${prompt}` }] }],
-          }),
-        })
-        if (!httpRes.ok) {
-          const errText = await httpRes.text()
-          throw new Error(errText)
-        }
-        const data = await httpRes.json()
-        output = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      } catch (httpErr: any) {
-        throw new Error(httpErr?.message || sdkErr?.message || 'Gemini call failed')
+      output = await callGemini(system, prompt, { timeoutMs: 22_000, maxAttempts: 3 })
+    } catch (e: any) {
+      if (e instanceof GeminiUnavailableError) {
+        return NextResponse.json({ error: e.message }, { status: 503 })
       }
+      throw e
     }
-    let json
+
+    let json: any
     try {
       json = JSON.parse(output)
     } catch {
@@ -139,7 +124,7 @@ Return STRICT JSON with keys only:
         })
     } catch {}
 
-    return NextResponse.json({ id: doc.id, result: json })
+    return NextResponse.json({ id: doc.id, result: json }, { headers: rateLimitHeaders(rl) })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }

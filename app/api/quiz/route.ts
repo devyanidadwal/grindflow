@@ -5,9 +5,7 @@ import { db } from '@/lib/db'
 import { documents, documentsText } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireUser } from '@/lib/auth'
-import { getStorageClient } from '@/lib/supabase-storage'
 
-const bucketName = process.env.SUPABASE_STORAGE_BUCKET || 'documents'
 const geminiApiKey = process.env.GEMINI_API_KEY || ''
 const defaultModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
 
@@ -20,10 +18,8 @@ export async function POST(req: NextRequest) {
     const { id, keyword } = body || {}
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const supabase = getStorageClient()
-
     const [doc] = await db
-      .select({ id: documents.id, userId: documents.userId, storagePath: documents.storagePath, fileName: documents.fileName })
+      .select({ id: documents.id, userId: documents.userId, storagePath: documents.storagePath, fileName: documents.fileName, fileUrl: documents.fileUrl })
       .from(documents)
       .where(eq(documents.id, id))
       .limit(1)
@@ -43,10 +39,10 @@ export async function POST(req: NextRequest) {
     } catch {}
 
     if (!text) {
-      const { data: fileData, error: dlErr } = await supabase.storage.from(bucketName).download(doc.storagePath)
-      if (dlErr || !fileData) return NextResponse.json({ error: dlErr?.message || 'Download failed' }, { status: 500 })
-
-      const arrayBuffer = await fileData.arrayBuffer()
+      if (!doc.fileUrl) return NextResponse.json({ error: 'File URL missing' }, { status: 500 })
+      const fileRes = await fetch(doc.fileUrl)
+      if (!fileRes.ok) return NextResponse.json({ error: 'Download failed' }, { status: 500 })
+      const arrayBuffer = await fileRes.arrayBuffer()
       const buffer = Buffer.from(arrayBuffer)
       const parsed = await pdfParse(buffer)
       text = parsed.text || ''

@@ -6,6 +6,7 @@ import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
 import { useUser, useClerk } from '@clerk/nextjs'
 import { toast } from 'sonner'
+import { uploadFiles } from '@/lib/uploadthing'
 import SoftCard from '@/components/ui/soft-card'
 import PrettyFlow from '@/components/ui/pretty-flow'
 import { motion } from 'framer-motion'
@@ -112,32 +113,14 @@ function DashboardContent() {
 
     try {
       setUploading(true)
-      const form = new FormData()
-      form.append('file', file)
-
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: form,
-        credentials: 'include',
-      })
-
-      if (!res.ok) {
-        const errorText = await res.text()
-        throw new Error(errorText || 'Upload failed')
-      }
-
-      const result = await res.json()
+      const uploaded = await uploadFiles('pdfUploader', { files: [file] })
+      if (!uploaded || uploaded.length === 0) throw new Error('Upload failed')
       toast.success('Document uploaded!')
-      if (result?.db?.warning) {
-        toast.info(`Uploaded, but metadata was not saved: ${result?.db?.message || 'check Supabase table & policies'}`)
-      }
       setFile(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
-      // refresh documents list after successful upload (background)
       loadDocuments()
     } catch (e: any) {
-      toast.error('Upload failed. Check console for details.')
-      // eslint-disable-next-line no-console
+      toast.error(e?.message || 'Upload failed. Check console for details.')
       console.error(e)
     } finally {
       setUploading(false)

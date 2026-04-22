@@ -92,6 +92,7 @@ export const documents = pgTable("documents", {
 	userId: text("user_id").notNull(),
 	fileName: text("file_name").notNull(),
 	storagePath: text("storage_path").notNull(),
+	fileUrl: text("file_url"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, (table) => [
 	index("idx_documents_user").using("btree", table.userId.asc().nullsLast().op("text_ops")),

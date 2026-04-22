@@ -11,11 +11,11 @@
   "dependencies": {
     "@clerk/nextjs": "^7.2.3",
     "@google/generative-ai": "^0.21.0",
-    "@supabase/supabase-js": "^2.77.0",
     "@tailwindcss/postcss": "^4.1.16",
     "@types/node": "^24.9.2",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@uploadthing/react": "^7.3.3",
     "autoprefixer": "^10.4.21",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
@@ -31,7 +31,8 @@
     "svix": "^1.91.1",
     "tailwind-merge": "^3.3.1",
     "tailwindcss": "^4.1.16",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "uploadthing": "^7.7.4"
   },
   "devDependencies": {
     "@types/pdf-parse": "^1.1.5",

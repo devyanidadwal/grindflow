@@ -3,7 +3,9 @@ import { db } from '@/lib/db'
 import { documents } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireUser } from '@/lib/auth'
-import { getStorageClient } from '@/lib/supabase-storage'
+import { UTApi } from 'uploadthing/server'
+
+const utapi = new UTApi()
 
 export async function DELETE(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   let documentId = ''
@@ -22,7 +24,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     } catch {}
   }
   if (!documentId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
-  const bucketName = process.env.SUPABASE_STORAGE_BUCKET || 'documents'
+
   try {
     const userId = await requireUser()
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -36,10 +38,13 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     if (doc.userId !== userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const supabase = getStorageClient()
-    const { error: remErr } = await supabase.storage.from(bucketName).remove([doc.storagePath])
-    const removedFromStorage = !remErr
-    if (remErr) console.warn('[DELETE] storage remove warning:', remErr.message)
+    let removedFromStorage = false
+    try {
+      await utapi.deleteFiles([doc.storagePath])
+      removedFromStorage = true
+    } catch (e) {
+      console.warn('[DELETE] UT remove warning:', (e as any)?.message || e)
+    }
 
     await db.delete(documents).where(eq(documents.id, documentId))
     return NextResponse.json({ success: true, removedFromStorage })

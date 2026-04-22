@@ -1,8 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { supabase } from '@/lib/supabase'
-import { toast } from 'sonner'
 
 interface Notification {
   id: string
@@ -24,6 +22,7 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
   const [unreadCount, setUnreadCount] = useState(0)
   const [showDropdown, setShowDropdown] = useState(false)
   const [loading, setLoading] = useState(false)
+  const pollRef = useRef<any>(null)
 
   useEffect(() => {
     if (!userId) {
@@ -32,69 +31,30 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
       return
     }
 
-    // Load notifications
     loadNotifications()
-
-    // Subscribe to new notifications (with error handling)
-    let channel: any = null
-    try {
-      channel = supabase
-        .channel(`notifications:${userId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'notifications',
-            filter: `user_id=eq.${userId}`,
-          },
-          (payload) => {
-            const newNotification = payload.new as Notification
-            setNotifications((prev) => [newNotification, ...prev])
-            setUnreadCount((prev) => prev + 1)
-            // Play notification sound
-            playNotificationSound()
-            toast.info(`You were mentioned by ${newNotification.title}`)
-          }
-        )
-        .subscribe()
-    } catch (e) {
-      console.warn('[NOTIFICATIONS] Realtime subscription failed, will use polling:', e)
-      // Fallback to polling if Realtime fails
-    }
-
-    return () => {
-      if (channel) {
-        supabase.removeChannel(channel)
-      }
-    }
+    pollRef.current = setInterval(loadNotifications, 15000)
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [userId])
 
   async function loadNotifications() {
-    if (!userId) return
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(50)
-
-      if (error) {
-        if (error.code === 'PGRST116' || 
-            error.message?.includes('does not exist') || 
-            error.message?.includes('Could not find the table') ||
-            error.message?.includes('schema cache')) {
-          // Table doesn't exist yet - show helpful message
-          console.warn('[NOTIFICATIONS] Notifications table does not exist. Please run the notifications setup in database-schema.sql or see SETUP-NOTIFICATIONS.md')
-          return
-        }
-        throw error
-      }
-
-      setNotifications(data || [])
-      setUnreadCount((data || []).filter((n) => !n.read).length)
+      const res = await fetch('/api/notifications', { cache: 'no-store' })
+      if (!res.ok) return
+      const data = await res.json()
+      const rows: any[] = data.notifications || []
+      const mapped: Notification[] = rows.map((r) => ({
+        id: r.id,
+        user_id: r.userId,
+        type: r.type,
+        title: r.title,
+        message: r.message,
+        related_message_id: r.relatedMessageId || undefined,
+        created_at: r.createdAt,
+        read: !!r.read,
+      }))
+      setNotifications(mapped)
+      setUnreadCount(mapped.filter((n) => !n.read).length)
     } catch (e: any) {
       console.error('[NOTIFICATIONS] Load error:', e.message || e)
     } finally {
@@ -104,13 +64,11 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
 
   async function markAsRead(notificationId: string) {
     try {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('id', notificationId)
-
-      if (error) throw error
-
+      await fetch('/api/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: notificationId }),
+      })
       setNotifications((prev) =>
         prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
       )
@@ -121,43 +79,16 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
   }
 
   async function markAllAsRead() {
-    if (!userId) return
     try {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('user_id', userId)
-        .eq('read', false)
-
-      if (error) throw error
-
+      await fetch('/api/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      })
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
       setUnreadCount(0)
     } catch (e: any) {
       console.error('[NOTIFICATIONS] Mark all read error:', e)
-    }
-  }
-
-  function playNotificationSound() {
-    try {
-      // Create a simple notification sound using Web Audio API
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-      const oscillator = audioContext.createOscillator()
-      const gainNode = audioContext.createGain()
-
-      oscillator.connect(gainNode)
-      gainNode.connect(audioContext.destination)
-
-      oscillator.frequency.value = 800
-      oscillator.type = 'sine'
-
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
-
-      oscillator.start(audioContext.currentTime)
-      oscillator.stop(audioContext.currentTime + 0.2)
-    } catch (e) {
-      console.error('[NOTIFICATIONS] Sound error:', e)
     }
   }
 
@@ -234,4 +165,3 @@ export default function NotificationBell({ userId }: NotificationBellProps) {
     </div>
   )
 }
-

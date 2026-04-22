@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { useUser, useClerk } from '@clerk/nextjs'
 import { toast } from 'sonner'
 import { motion } from 'framer-motion'
 
 export default function OnboardingPage() {
   const router = useRouter()
+  const { isLoaded, isSignedIn, user } = useUser()
+  const { signOut } = useClerk()
   const [username, setUsername] = useState('')
   const [checking, setChecking] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -15,69 +17,34 @@ export default function OnboardingPage() {
   const [suggestions, setSuggestions] = useState<string[]>([])
 
   useEffect(() => {
-    let mounted = true
-    // Check if user is authenticated
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!mounted) return
-      if (error || !data?.session) {
-        router.replace('/')
-        return
-      }
-      // Check if user already has a username
-      checkExistingUsername()
-    })
-
-    return () => {
-      mounted = false
+    if (!isLoaded) return
+    if (!isSignedIn) {
+      router.replace('/')
+      return
     }
-  }, [router])
+    checkExistingUsername()
+  }, [isLoaded, isSignedIn])
 
   async function checkExistingUsername() {
     try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      if (!sessionData.session) {
-        router.replace('/')
-        return
-      }
-
-      const token = sessionData.session.access_token
-      
-      try {
-        const res = await fetch('/api/user/check-username', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        })
-
-        if (res.ok) {
-          const data = await res.json()
-          const { hasUsername } = data
-          if (hasUsername) {
-            // User already has username, go to dashboard
-            router.replace('/dashboard')
-            return
-          }
-        } else {
-          // If API returns error, still allow user to set username
-          console.warn('[ONBOARDING] Check username API returned error:', res.status)
+      const res = await fetch('/api/user/check-username', { cache: 'no-store' })
+      if (res.ok) {
+        const { hasUsername } = await res.json()
+        if (hasUsername) {
+          router.replace('/dashboard')
+          return
         }
-      } catch (fetchError) {
-        // Network error or fetch failed - allow user to continue anyway
-        console.error('[ONBOARDING] Fetch error:', fetchError)
       }
-      
       setChecking(false)
 
-      // Generate suggestions based on email
-      const email = sessionData.session.user.email || ''
+      const email = user?.primaryEmailAddress?.emailAddress || ''
       if (email) {
         const base = email.split('@')[0]
-        const suggestions = [
+        setSuggestions([
           base,
           `${base}${Math.floor(Math.random() * 1000)}`,
           `${base}_${Math.floor(Math.random() * 100)}`,
-        ]
-        setSuggestions(suggestions)
+        ])
       }
     } catch (e) {
       console.error('[ONBOARDING] Check username error:', e)
@@ -91,61 +58,27 @@ export default function OnboardingPage() {
     setLoading(true)
 
     const trimmedUsername = username.trim()
-    
-    // Validate username
-    if (!trimmedUsername) {
-      setError('Username is required')
-      setLoading(false)
-      return
-    }
-
-    if (trimmedUsername.length < 3) {
-      setError('Username must be at least 3 characters')
-      setLoading(false)
-      return
-    }
-
-    if (trimmedUsername.length > 20) {
-      setError('Username must be less than 20 characters')
-      setLoading(false)
-      return
-    }
-
+    if (!trimmedUsername) { setError('Username is required'); setLoading(false); return }
+    if (trimmedUsername.length < 3) { setError('Username must be at least 3 characters'); setLoading(false); return }
+    if (trimmedUsername.length > 20) { setError('Username must be less than 20 characters'); setLoading(false); return }
     if (!/^[a-zA-Z0-9_-]+$/.test(trimmedUsername)) {
       setError('Username can only contain letters, numbers, underscores, and hyphens')
-      setLoading(false)
-      return
+      setLoading(false); return
     }
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      if (!sessionData.session) {
-        router.replace('/')
-        return
-      }
-
-      const token = sessionData.session.access_token
       const res = await fetch('/api/user/set-username', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: trimmedUsername }),
       })
-
       const data = await res.json()
-
       if (!res.ok) {
-        if (data.error === 'username_taken') {
-          setError('This username is already taken. Please choose another one.')
-        } else {
-          setError(data.error || 'Failed to set username. Please try again.')
-        }
+        if (data.error === 'username_taken') setError('This username is already taken. Please choose another one.')
+        else setError(data.error || 'Failed to set username. Please try again.')
         setLoading(false)
         return
       }
-
       toast.success('Username set successfully!')
       router.replace('/dashboard')
     } catch (e: any) {
@@ -155,7 +88,7 @@ export default function OnboardingPage() {
     }
   }
 
-  if (checking) {
+  if (!isLoaded || checking) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="card max-w-md w-full text-center">
@@ -181,14 +114,11 @@ export default function OnboardingPage() {
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
             <div className="w-26 h-24 rounded-xl bg-gradient-to-br from-accent to-[#9ad4ff] overflow-hidden relative">
-              <img 
-                src="/49081F90-0AE7-46AD-BAF4-D21147D31B37_1_201_a.jpeg" 
-                alt="Logo" 
+              <img
+                src="/49081F90-0AE7-46AD-BAF4-D21147D31B37_1_201_a.jpeg"
+                alt="Logo"
                 className="w-full h-full object-cover"
-                onError={(e) => {
-                  // Hide image on error, show placeholder instead
-                  e.currentTarget.style.display = 'none'
-                }}
+                onError={(e) => { e.currentTarget.style.display = 'none' }}
               />
             </div>
           </div>
@@ -198,17 +128,12 @@ export default function OnboardingPage() {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label htmlFor="username" className="block text-sm font-medium mb-2">
-              Username
-            </label>
+            <label htmlFor="username" className="block text-sm font-medium mb-2">Username</label>
             <input
               id="username"
               type="text"
               value={username}
-              onChange={(e) => {
-                setUsername(e.target.value)
-                setError('')
-              }}
+              onChange={(e) => { setUsername(e.target.value); setError('') }}
               placeholder="Enter your username"
               className="input-field w-full"
               maxLength={20}
@@ -238,10 +163,7 @@ export default function OnboardingPage() {
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => {
-                      setUsername(suggestion)
-                      setError('')
-                    }}
+                    onClick={() => { setUsername(suggestion); setError('') }}
                     className="px-3 py-1.5 text-xs rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
                   >
                     {suggestion}
@@ -263,18 +185,13 @@ export default function OnboardingPage() {
                 </svg>
                 Setting up...
               </span>
-            ) : (
-              'Continue'
-            )}
+            ) : 'Continue'}
           </button>
         </form>
 
         <div className="mt-6 text-center">
           <button
-            onClick={async () => {
-              await supabase.auth.signOut()
-              router.replace('/')
-            }}
+            onClick={async () => { await signOut(); router.replace('/') }}
             className="text-sm text-muted hover:text-eaf0ff transition-colors"
           >
             Sign out and use a different account
@@ -284,4 +201,3 @@ export default function OnboardingPage() {
     </div>
   )
 }
-

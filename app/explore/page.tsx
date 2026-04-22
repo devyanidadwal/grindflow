@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { useUser } from '@clerk/nextjs'
 import { toast } from 'sonner'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
@@ -40,77 +40,36 @@ export default function ExplorePage() {
   const [selectedFilters, setSelectedFilters] = useState<{ subject?: string; year?: string; degree?: string }>({})
   const [viewAnalysisDocId, setViewAnalysisDocId] = useState<string | null>(null)
 
+  const { isLoaded, isSignedIn, user } = useUser()
   useEffect(() => {
-    let mounted = true
-    // Quick check
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!mounted) return
-      if (data?.session) {
-        // Check if user has username (only if authenticated - explore allows browsing without auth)
-        const token = data.session.access_token
-        try {
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (res.ok) {
-            const { hasUsername } = await res.json()
-            if (!hasUsername) {
-              // User is authenticated but no username - redirect to onboarding
-              router.replace('/onboarding')
-              return
-            }
-          }
-        } catch (e) {
-          console.error('[EXPLORE] Check username error:', e)
-          // If check fails and user is authenticated, redirect to onboarding
-          router.replace('/onboarding')
-          return
+    if (!isLoaded) return
+    if (!isSignedIn) {
+      setIsAuthenticated(false)
+      setUserEmail('')
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/user/check-username', { cache: 'no-store' })
+        if (cancelled) return
+        if (res.ok) {
+          const { hasUsername } = await res.json()
+          if (!hasUsername) { router.replace('/onboarding'); return }
+        } else {
+          router.replace('/onboarding'); return
         }
-        
-        setIsAuthenticated(true)
-        const email = data.session.user?.email || ''
-        const username = email ? email.split('@')[0] : 'User'
-        setUserEmail(username)
-        setUserId(data.session.user?.id || '')
+      } catch (e) {
+        console.error('[EXPLORE] Check username error:', e)
+        router.replace('/onboarding'); return
       }
-    })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
-      if (!mounted) return
-      if (session) {
-        // Check if user has username
-        const token = session.access_token
-        try {
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (res.ok) {
-            const { hasUsername } = await res.json()
-            if (!hasUsername) {
-              router.replace('/onboarding')
-              return
-            }
-          } else {
-            router.replace('/onboarding')
-            return
-          }
-        } catch (e) {
-          console.error('[EXPLORE] Check username error:', e)
-          router.replace('/onboarding')
-          return
-        }
-        
-        setIsAuthenticated(true)
-        const email = session.user?.email || ''
-        const username = email ? email.split('@')[0] : 'User'
-        setUserEmail(username)
-        setUserId(session.user?.id || '')
-      } else {
-        setIsAuthenticated(false)
-        setUserEmail('')
-      }
-    })
-    return () => { mounted = false; subscription.unsubscribe() }
-  }, [router])
+      setIsAuthenticated(true)
+      const email = user?.primaryEmailAddress?.emailAddress || ''
+      setUserEmail(email ? email.split('@')[0] : (user?.username || 'User'))
+      setUserId(user?.id || '')
+    })()
+    return () => { cancelled = true }
+  }, [isLoaded, isSignedIn, user, router])
 
   useEffect(() => {
     // Load public docs even if not authenticated (browsing allowed)
@@ -130,12 +89,7 @@ export default function ExplorePage() {
   async function loadPublicDocs() {
     try {
       setDocsLoading(true)
-      const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData.session?.access_token
-
-      const res = await fetch('/api/public-library', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
+      const res = await fetch('/api/public-library')
       if (!res.ok) {
         const text = await res.text()
         throw new Error(text || 'Failed to load public library')
@@ -152,22 +106,13 @@ export default function ExplorePage() {
 
   async function viewDocument(doc: PublicDoc) {
     try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData.session?.access_token
-
-      const res = await fetch(`/api/public-library/view?id=${encodeURIComponent(doc.document_id)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-
+      const res = await fetch(`/api/public-library/view?id=${encodeURIComponent(doc.document_id)}`)
       if (!res.ok) {
         const text = await res.text()
         throw new Error(text || 'Failed to get view URL')
       }
-
       const { url } = await res.json()
-      if (url) {
-        window.open(url, '_blank')
-      }
+      if (url) window.open(url, '_blank')
     } catch (e: any) {
       toast.error(e?.message || 'Failed to open PDF')
     }
@@ -175,14 +120,7 @@ export default function ExplorePage() {
 
   async function downloadDocument(doc: PublicDoc) {
     try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData.session?.access_token
-
-      // Use API endpoint for download to handle auth properly
-      const res = await fetch(`/api/public-library/download?id=${encodeURIComponent(doc.document_id)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-
+      const res = await fetch(`/api/public-library/download?id=${encodeURIComponent(doc.document_id)}`)
       if (!res.ok) {
         const text = await res.text()
         throw new Error(text || 'Download failed')

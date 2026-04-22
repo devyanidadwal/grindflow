@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
-import { supabase } from '@/lib/supabase'
+import { useUser, useClerk } from '@clerk/nextjs'
 import { toast } from 'sonner'
 import SoftCard from '@/components/ui/soft-card'
 import PrettyFlow from '@/components/ui/pretty-flow'
@@ -63,116 +63,41 @@ function DashboardContent() {
     }
   }, [searchParams])
 
+  const { isLoaded, isSignedIn, user } = useUser()
+  const { signOut } = useClerk()
+
   useEffect(() => {
-    let mounted = true
-
-    // Quick synchronous check first
-    supabase.auth.getSession().then(async ({ data, error }) => {
-      if (!mounted) return
-      if (data?.session) {
-        // Check if user has username, redirect to onboarding if not
-        const token = data.session.access_token
-        try {
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (res.ok) {
-            const { hasUsername, username: profileUsername } = await res.json()
-            if (!hasUsername) {
-              router.replace('/onboarding')
-              return
-            }
-            // Use the profile username or fallback to email username
-            const email = data.session.user.email || ''
-            const displayUsername = profileUsername || (email ? email.split('@')[0] : 'User')
-        setIsAuthenticated(true)
-            setUserEmail(displayUsername)
-            setUserId(data.session.user.id)
-            setAuthStatus(`Signed in as ${displayUsername}`)
-          } else {
-            // If check fails, redirect to onboarding to be safe
-            router.replace('/onboarding')
-          }
-        } catch (e) {
-          console.error('[DASHBOARD] Check username error:', e)
-          router.replace('/onboarding')
-        }
-      } else if (error?.message?.includes('refresh') || error?.message?.includes('Refresh Token')) {
-        supabase.auth.signOut().then(() => router.replace('/'))
-      } else {
-        // No session, redirect to home
-        router.replace('/')
-      }
-    })
-
-    // Set up auth state listener for real-time updates
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (!mounted) return
-        
-      if (event === 'SIGNED_OUT' || !session) {
-        setIsAuthenticated(false)
-        setUserEmail('')
-        setAuthStatus('Not signed in')
-        docsLoadedRef.current = false // Reset so docs reload on next login
-        router.replace('/')
-      } else if (session) {
-        // Check if user has username
-        const token = session.access_token
-        try {
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (res.ok) {
-            const { hasUsername, username: profileUsername } = await res.json()
-            if (!hasUsername) {
-              router.replace('/onboarding')
-              return
-            }
-            // Use the profile username or fallback to email username
-            const email = session.user.email || ''
-            const displayUsername = profileUsername || (email ? email.split('@')[0] : 'User')
+    if (!isLoaded) return
+    if (!isSignedIn) { router.replace('/'); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/user/check-username', { cache: 'no-store' })
+        if (cancelled) return
+        if (res.ok) {
+          const { hasUsername, username: profileUsername } = await res.json()
+          if (!hasUsername) { router.replace('/onboarding'); return }
+          const email = user?.primaryEmailAddress?.emailAddress || ''
+          const displayUsername = profileUsername || (email ? email.split('@')[0] : (user?.username || 'User'))
           setIsAuthenticated(true)
-            setUserEmail(displayUsername)
-            setUserId(session.user.id)
-            setAuthStatus(`Signed in as ${displayUsername}`)
-            docsLoadedRef.current = false // Reset so docs load for new session
+          setUserEmail(displayUsername)
+          setUserId(user?.id || '')
+          setAuthStatus(`Signed in as ${displayUsername}`)
         } else {
-            router.replace('/onboarding')
-        }
-        } catch (e) {
-          console.error('[DASHBOARD] Check username error:', e)
           router.replace('/onboarding')
         }
+      } catch (e) {
+        console.error('[DASHBOARD] Check username error:', e)
+        router.replace('/onboarding')
       }
-    })
+    })()
+    return () => { cancelled = true }
+  }, [isLoaded, isSignedIn, user, router])
 
-    return () => {
-      mounted = false
-      subscription.unsubscribe()
-    }
-  }, [router])
-
-  // Email/password sign-in removed in favor of Google OAuth
-
-  const handleGoogleSignIn = async () => {
-    try {
-      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/dashboard` : undefined
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo },
-      })
-      if (error) throw error
-      // For OAuth, Supabase will redirect; as a guard, show a toast
-      toast.info('Redirecting to Google…')
-    } catch (e: any) {
-      toast.error(`Google sign-in failed: ${e.message || e}`)
-    }
-  }
-
-  // Email/password sign-up removed
+  const handleGoogleSignIn = () => { router.push('/signin') }
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    await signOut()
     setUserEmail('')
     setAuthStatus('Not signed in')
     toast.success('Signed out')
@@ -190,15 +115,8 @@ function DashboardContent() {
       const form = new FormData()
       form.append('file', file)
 
-      const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token
-
-      const headers: HeadersInit = {}
-      if (token) headers['Authorization'] = `Bearer ${token}`
-
       const res = await fetch('/api/upload', {
         method: 'POST',
-        headers,
         body: form,
         credentials: 'include',
       })
@@ -243,14 +161,12 @@ function DashboardContent() {
       setDocsLoading(true)
       // Clear current list immediately to avoid showing stale rows during reload
       setDocuments([])
-      const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData.session?.access_token
-      if (!token) {
-        // Avoid getting stuck on Loading… if token is missing
+      if (!isSignedIn) {
+        // Avoid getting stuck on Loading… if not signed in
         setDocsLoading(false)
         return
       }
-      const res = await fetch(`/api/documents?t=${Date.now()}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' as RequestCache })
+      const res = await fetch(`/api/documents?t=${Date.now()}`, { cache: 'no-store' as RequestCache })
       if (!res.ok) {
         const text = await res.text()
         throw new Error(text)
@@ -271,12 +187,8 @@ function DashboardContent() {
       setDeletingIds((s) => ({ ...s, [id]: true }))
       const prevDocs = documents
       setDocuments((d) => d.filter((x) => x.id !== id))
-      const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData.session?.access_token
-      if (!token) return
       const res = await fetch(`/api/documents/${id}?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) {
         let msg = 'Failed'
@@ -299,12 +211,9 @@ function DashboardContent() {
   async function analyzeDocument(id: string) {
     try {
       setAnalyzingIds((s) => ({ ...s, [id]: true }))
-      const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData.session?.access_token
-      if (!token) return
       const res = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, context: analysisQuery }),
       })
       if (!res.ok) {
@@ -641,15 +550,12 @@ function DashboardContent() {
                           setQuizQuestions([])
                           setQuizAnswers({})
                           setShowQuizResults(false)
-                          const { data: sessionData } = await supabase.auth.getSession()
-                          const token = sessionData.session?.access_token
-                          if (!token) throw new Error('Not authenticated')
                           const controller = new AbortController()
                           const QUIZ_TIMEOUT_MS = 20000
                           const t = setTimeout(() => controller.abort(), QUIZ_TIMEOUT_MS)
                           const res = await fetch('/api/quiz', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ id: quizSelectedDocId, keyword: quizKeywords }),
                             signal: controller.signal,
                           })
@@ -878,12 +784,9 @@ function DashboardContent() {
                               setStudyflowDiagram('')
                               setStudyflowAnalysis('')
                               setShowStudyflowAnalysis(false)
-                              const { data: sessionData } = await supabase.auth.getSession()
-                              const token = sessionData.session?.access_token
-                              if (!token) throw new Error('Not authenticated')
                               const res = await fetch('/api/studyflow', {
                                 method: 'POST',
-                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ id: studyflowSelectedDocId, type: 'diagram' }),
                               })
                               if (!res.ok) {
@@ -938,12 +841,9 @@ function DashboardContent() {
                               onClick={async () => {
                                 try {
                                   setStudyflowAnalysisLoading(true)
-                                  const { data: sessionData } = await supabase.auth.getSession()
-                                  const token = sessionData.session?.access_token
-                                  if (!token) throw new Error('Not authenticated')
                                   const res = await fetch('/api/studyflow', {
                                     method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                    headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ id: studyflowSelectedDocId, type: 'analysis' }),
                                   })
                                   if (!res.ok) {
@@ -1075,13 +975,8 @@ function DashboardContent() {
                   onDelete={async (id: string) => {
                     try {
                       setDeletingIds((s) => ({ ...s, [id]: true }))
-                      const { data: sessionData } = await supabase.auth.getSession()
-                      const token = sessionData.session?.access_token
-                      if (!token) throw new Error('Not authenticated')
-
                       const res = await fetch(`/api/documents?id=${id}`, {
                         method: 'DELETE',
-                        headers: { Authorization: `Bearer ${token}` },
                       })
                       if (!res.ok) {
                         const text = await res.text()

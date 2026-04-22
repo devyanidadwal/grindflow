@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { db } from '@/lib/db'
 import { documents } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
+import { getStorageClient } from '@/lib/supabase-storage'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 const bucketName = process.env.SUPABASE_STORAGE_BUCKET || 'documents'
 
 export async function GET(req: NextRequest) {
@@ -22,9 +20,7 @@ export async function GET(req: NextRequest) {
 
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
 
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
+    const supabase = getStorageClient()
     const { data: signed, error: urlErr } = await supabase.storage
       .from(bucketName)
       .createSignedUrl(doc.storagePath, 60 * 60)

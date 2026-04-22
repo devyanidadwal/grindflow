@@ -1,23 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import pdfParse from 'pdf-parse'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeForPrompt, buildShortText } from '@/lib/text'
 import { db } from '@/lib/db'
 import { documents, documentsText } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
+import { requireUser } from '@/lib/auth'
+import { getStorageClient } from '@/lib/supabase-storage'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 const bucketName = process.env.SUPABASE_STORAGE_BUCKET || 'documents'
 const geminiApiKey = process.env.GEMINI_API_KEY || ''
 const defaultModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization')
-    const token = authHeader?.replace('Bearer ', '') || ''
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const userId = await requireUser()
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await req.json()
     const { id, type = 'both' } = body || {}
@@ -26,13 +24,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid type. Must be "diagram", "analysis", or "both"' }, { status: 400 })
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-
-    const { data: auth } = await supabase.auth.getUser(token)
-    const user = auth?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const supabase = getStorageClient()
 
     const [doc] = await db
       .select({ id: documents.id, userId: documents.userId, storagePath: documents.storagePath, fileName: documents.fileName })
@@ -41,7 +33,7 @@ export async function POST(req: NextRequest) {
       .limit(1)
 
     if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    if (doc.userId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (doc.userId !== userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     // Load cached text if available; else parse and cache
     let text = ''

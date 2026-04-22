@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { useUser } from '@clerk/nextjs'
 import { toast } from 'sonner'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
@@ -51,74 +51,32 @@ export default function ChatPage() {
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
 
+  const { isLoaded, isSignedIn, user } = useUser()
   useEffect(() => {
-    let mounted = true
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!mounted) return
-      if (data?.session) {
-        // Check if user has username
-        const sessionToken = data.session.access_token
-        try {
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${sessionToken}` },
-          })
-          if (res.ok) {
-            const { hasUsername, username: profileUsername } = await res.json()
-            if (!hasUsername) {
-              router.replace('/onboarding')
-              return
-            }
-            // Set username from profile
-            setIsAuthenticated(true)
-            setUserId(data.session.user?.id || '')
-            setUserEmail(profileUsername || data.session.user?.email?.split('@')[0] || 'User')
-          } else {
-            router.replace('/onboarding')
-            return
-          }
-        } catch (e) {
-          console.error('[CHAT] Check username error:', e)
+    if (!isLoaded) return
+    if (!isSignedIn) { router.replace('/'); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/user/check-username', { cache: 'no-store' })
+        if (cancelled) return
+        if (res.ok) {
+          const { hasUsername, username: profileUsername } = await res.json()
+          if (!hasUsername) { router.replace('/onboarding'); return }
+          setIsAuthenticated(true)
+          setUserId(user?.id || '')
+          const email = user?.primaryEmailAddress?.emailAddress || ''
+          setUserEmail(profileUsername || (email ? email.split('@')[0] : (user?.username || 'User')))
+        } else {
           router.replace('/onboarding')
-          return
         }
-      } else {
-        router.replace('/')
+      } catch (e) {
+        console.error('[CHAT] Check username error:', e)
+        router.replace('/onboarding')
       }
-    })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
-      if (!mounted) return
-      if (session) {
-        // Check if user has username
-        const sessionToken = session.access_token
-        try {
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${sessionToken}` },
-          })
-          if (res.ok) {
-            const { hasUsername, username: profileUsername } = await res.json()
-            if (!hasUsername) {
-              router.replace('/onboarding')
-              return
-            }
-            // Set username from profile
-            setIsAuthenticated(true)
-            setUserId(session.user?.id || '')
-            setUserEmail(profileUsername || session.user?.email?.split('@')[0] || 'User')
-          } else {
-            router.replace('/onboarding')
-            return
-          }
-        } catch (e) {
-          console.error('[CHAT] Check username error:', e)
-          router.replace('/onboarding')
-          return
-        }
-      } else {
-        router.replace('/')
-      }
-    })
-    return () => { mounted = false; subscription.unsubscribe() }
-  }, [router])
+    })()
+    return () => { cancelled = true }
+  }, [isLoaded, isSignedIn, user, router])
 
   // Fetch username suggestions when @ is typed
   useEffect(() => {
@@ -130,13 +88,7 @@ export default function ChatPage() {
       }
 
       try {
-        const { data: sessionData } = await supabase.auth.getSession()
-        const token = sessionData.session?.access_token
-        if (!token) return
-
-        const res = await fetch(`/api/chat/search-usernames?q=${encodeURIComponent(mentionQuery)}&limit=5`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
+        const res = await fetch(`/api/chat/search-usernames?q=${encodeURIComponent(mentionQuery)}&limit=5`)
 
         if (res.ok) {
           const { usernames } = await res.json()
@@ -208,84 +160,27 @@ export default function ChatPage() {
   }
 
   async function loadChatrooms() {
+    const publicRoom: Chatroom = {
+      id: publicRoomId,
+      name: 'Public Chat',
+      is_private: false,
+      created_by: '',
+      created_at: new Date().toISOString(),
+    }
     try {
-      // Always add public room first
-      const allRooms: Chatroom[] = []
-      const publicRoom: Chatroom = {
-        id: publicRoomId,
-        name: 'Public Chat',
-        is_private: false,
-        created_by: '',
-        created_at: new Date().toISOString(),
-      }
-      allRooms.push(publicRoom)
-
-      // Try to load chatrooms (if table exists)
-      // Load public rooms and rooms created by user
-      const { data: publicRooms, error: publicError } = await supabase
-        .from('chatrooms')
-        .select('*')
-        .eq('is_private', false)
-        .order('created_at', { ascending: false })
-
-      const { data: userRooms, error: userError } = await supabase
-        .from('chatrooms')
-        .select('*')
-        .eq('created_by', userId)
-        .order('created_at', { ascending: false })
-
-      if (publicError || userError) {
-        const error = publicError || userError
-        // If table doesn't exist or RLS error, just use public room
-        if (error !== null && (error.code === 'PGRST116' || 
-            error.message?.includes('does not exist') || 
-            error.message?.includes('Could not find the table') ||
-            error.message?.includes('schema cache'))) {
-          console.warn('[CHAT] Chatrooms table does not exist yet. Please run database-schema.sql in Supabase SQL Editor')
-          setChatrooms(allRooms)
-          return
-        }
-        // For other errors, continue with what we have
-      }
-
-      // Combine results
-      const data = [...(publicRooms || []), ...(userRooms || [])]
-      // Remove duplicates
-      const uniqueRooms = Array.from(new Map(data.map((r: any) => [r.id, r])).values())
-
-      // Get user's private rooms
-      const { data: memberRooms } = await supabase
-        .from('chatroom_members')
-        .select('chatroom_id, chatrooms(*)')
-        .eq('user_id', userId)
-
-      // Add other rooms
-      uniqueRooms.forEach((room: any) => {
-        if (room.id !== publicRoomId) {
-          allRooms.push(room)
-        }
-      })
-
-      // Add rooms from memberships
-      if (memberRooms) {
-        memberRooms.forEach((mr: any) => {
-          if (mr.chatrooms && !allRooms.find(r => r.id === mr.chatroom_id)) {
-            allRooms.push(mr.chatrooms)
-          }
-        })
-      }
-
-      setChatrooms(allRooms)
+      const res = await fetch('/api/chat/rooms', { cache: 'no-store' })
+      if (!res.ok) { setChatrooms([publicRoom]); return }
+      const { rooms } = await res.json()
+      const mapped: Chatroom[] = (rooms || []).map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        is_private: !!r.isPrivate,
+        created_by: r.createdBy || '',
+        created_at: r.createdAt,
+      }))
+      setChatrooms([publicRoom, ...mapped.filter((r) => r.id !== publicRoomId)])
     } catch (e: any) {
       console.error('[CHAT] Load rooms error:', e.message || e)
-      // Don't show error toast, just log it and show public room
-      const publicRoom: Chatroom = {
-        id: publicRoomId,
-        name: 'Public Chat',
-        is_private: false,
-        created_by: '',
-        created_at: new Date().toISOString(),
-      }
       setChatrooms([publicRoom])
     }
   }
@@ -293,68 +188,21 @@ export default function ChatPage() {
   async function loadMessages(roomId: string) {
     try {
       setLoading(true)
-      // Load messages
-      const { data, error } = await supabase
-        .from('chat_messages')
-        .select('*')
-        .eq('chatroom_id', roomId)
-        .order('created_at', { ascending: true })
-        .limit(100)
+      const res = await fetch(`/api/chat/messages?roomId=${encodeURIComponent(roomId)}`, { cache: 'no-store' })
+      if (!res.ok) { setMessages([]); return }
+      const { messages: rows } = await res.json()
 
-      if (error) {
-        // If table doesn't exist, just show empty messages
-        if (error.code === 'PGRST116' || 
-            error.message?.includes('does not exist') || 
-            error.message?.includes('Could not find the table') ||
-            error.message?.includes('schema cache')) {
-          console.warn('[CHAT] Chat messages table does not exist yet. Please run database-schema.sql in Supabase SQL Editor')
-          setMessages([])
-          setLoading(false)
-          return
-        }
-        throw error
-      }
-
-      // Fetch usernames for all messages
-      const userIds = [...new Set((data || []).map((m: any) => m.user_id))]
+      const userIds = Array.from(new Set((rows || []).map((m: any) => m.userId)))
       const usernameMap: Record<string, string> = {}
-      
-      // Get current user username from profile
-      const { data: sessionData } = await supabase.auth.getSession()
-      if (sessionData.session?.user?.id) {
+      if (userIds.length > 0) {
         try {
-          const token = sessionData.session.access_token
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (res.ok) {
-            const { username } = await res.json()
-            if (username) {
-              usernameMap[sessionData.session.user.id] = username
-            }
-          }
-        } catch (e) {
-          // Fallback to email username
-          const email = sessionData.session.user.email || ''
-          usernameMap[sessionData.session.user.id] = email ? email.split('@')[0] : 'You'
-        }
-      }
-
-      // Fetch other usernames via API
-      const allUserIds = userIds.filter(id => !usernameMap[id])
-      if (allUserIds.length > 0) {
-        try {
-          const token = sessionData.session?.access_token
-          const res = await fetch('/api/chat/users', {
+          const u = await fetch('/api/chat/users', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ user_ids: allUserIds }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_ids: userIds }),
           })
-          if (res.ok) {
-            const { usernames } = await res.json()
+          if (u.ok) {
+            const { usernames } = await u.json()
             Object.assign(usernameMap, usernames)
           }
         } catch (e) {
@@ -362,118 +210,36 @@ export default function ChatPage() {
         }
       }
 
-      const formatted = (data || []).map((msg: any) => {
-        // Get username from map, fallback to message user_email, then to 'Unknown'
-        let displayName = usernameMap[msg.user_id]
-        
-        if (!displayName) {
-          // Fallback: if user_email in message is still email, extract username
-          displayName = msg.user_email || 'Unknown'
-          if (displayName.includes('@')) {
-            displayName = displayName.split('@')[0]
-          }
-        }
-        
+      const formatted: Message[] = (rows || []).map((m: any) => {
+        let displayName = usernameMap[m.userId] || m.userEmail || 'Unknown'
+        if (displayName.includes('@')) displayName = displayName.split('@')[0]
         return {
-          id: msg.id,
-          chatroom_id: msg.chatroom_id,
-          user_id: msg.user_id,
+          id: m.id,
+          chatroom_id: m.chatroomId,
+          user_id: m.userId,
           user_email: displayName,
-          content: msg.content,
-          created_at: msg.created_at,
+          content: m.content,
+          created_at: m.createdAt,
         }
       })
-      setMessages(prev => {
-        // Merge with existing messages, avoiding duplicates
-        const existingIds = new Set(prev.map(m => m.id))
-        const newMessages = formatted.filter(m => !existingIds.has(m.id))
-        return [...prev, ...newMessages].sort((a, b) => 
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id))
+        const fresh = formatted.filter((m) => !existingIds.has(m.id))
+        return [...prev, ...fresh].sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         )
       })
     } catch (e: any) {
       console.error('[CHAT] Load messages error:', e.message || e)
-      // Don't show error toast for missing tables, just set empty on first load
-      if (messages.length === 0) {
-        setMessages([])
-      }
+      if (messages.length === 0) setMessages([])
     } finally {
       setLoading(false)
     }
   }
 
-  function subscribeToMessages(roomId: string): (() => void) | null {
-    try {
-      const channel = supabase.channel(`chatroom:${roomId}`)
-        .on('postgres_changes', 
-          { 
-            event: 'INSERT', 
-            schema: 'public', 
-            table: 'chat_messages',
-            filter: `chatroom_id=eq.${roomId}`
-          }, 
-          async (payload) => {
-            // Fetch username for the new message
-            let displayName = payload.new.user_email || 'User'
-            
-            // If it's an email, try to fetch the actual username
-            if (displayName.includes('@')) {
-              try {
-                const { data: sessionData } = await supabase.auth.getSession()
-                const token = sessionData.session?.access_token
-                if (token) {
-                  const res = await fetch('/api/chat/users', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      Authorization: `Bearer ${token}`,
-                    },
-                    body: JSON.stringify({ user_ids: [payload.new.user_id] }),
-                  })
-                  if (res.ok) {
-                    const { usernames } = await res.json()
-                    displayName = usernames[payload.new.user_id] || displayName.split('@')[0]
-                  } else {
-                    displayName = displayName.split('@')[0]
-                  }
-                } else {
-                  displayName = displayName.split('@')[0]
-                }
-              } catch (e) {
-                displayName = displayName.split('@')[0]
-              }
-            }
-            
-            const newMsg: Message = {
-              id: payload.new.id,
-              chatroom_id: payload.new.chatroom_id,
-              user_id: payload.new.user_id,
-              user_email: displayName,
-              content: payload.new.content,
-              created_at: payload.new.created_at,
-            }
-            setMessages(prev => {
-              // Avoid duplicates
-              if (prev.find(m => m.id === newMsg.id)) return prev
-              return [...prev, newMsg]
-            })
-          }
-        )
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            console.log('[CHAT] Realtime subscription active')
-          } else if (status === 'CHANNEL_ERROR') {
-            console.warn('[CHAT] Realtime subscription error, will use polling')
-          }
-        })
-
-      return () => {
-        supabase.removeChannel(channel)
-      }
-    } catch (e) {
-      console.warn('[CHAT] Failed to set up realtime subscription:', e)
-      return null
-    }
+  function subscribeToMessages(_roomId: string): (() => void) | null {
+    // Realtime replaced with polling (see poll interval in the effect above).
+    return null
   }
 
   function selectMention(username: string) {
@@ -500,84 +266,41 @@ export default function ChatPage() {
 
   async function sendMessage() {
     if (!newMessage.trim() || !activeRoom || !userId || !userEmail) return
-
     const messageContent = newMessage.trim()
     const mentions = extractMentions(messageContent)
 
     try {
-      // Ensure we're using the profile username (userEmail should already be the username from onboarding)
-      // But double-check by fetching it if needed
-      let displayUsername = userEmail
-      
-      // Verify it's actually a username and not an email-derived value
-      if (displayUsername.includes('@')) {
-        // If somehow it's still an email, fetch the actual username
-        try {
-          const { data: sessionData } = await supabase.auth.getSession()
-          const token = sessionData.session?.access_token
-          if (token) {
-            const res = await fetch('/api/user/check-username', {
-              headers: { Authorization: `Bearer ${token}` },
-            })
-            if (res.ok) {
-              const { username } = await res.json()
-              if (username) displayUsername = username
-            }
-          }
-        } catch (e) {
-          // Keep userEmail if fetch fails
-        }
+      const res = await fetch('/api/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId: activeRoom, content: messageContent }),
+      })
+      if (!res.ok) {
+        const t = await res.text()
+        throw new Error(t || 'Failed to send message')
       }
+      const { message: inserted } = await res.json()
 
-      const { data: insertedData, error } = await supabase
-        .from('chat_messages')
-        .insert({
-          chatroom_id: activeRoom,
-          user_id: userId,
-          user_email: displayUsername,
-          content: messageContent,
-        })
-        .select('id')
-        .single()
-
-      if (error) {
-        if (error.code === 'PGRST116' || 
-            error.message?.includes('does not exist') || 
-            error.message?.includes('Could not find the table') ||
-            error.message?.includes('schema cache')) {
-          toast.error('Database tables not set up. Please run database-schema.sql in Supabase SQL Editor.')
-          return
-        }
-        throw error
-      }
-
-      // Handle mentions if any
-      if (mentions.length > 0 && insertedData?.id) {
+      if (mentions.length > 0 && inserted?.id) {
         try {
-          const { data: sessionData } = await supabase.auth.getSession()
-          const token = sessionData.session?.access_token
-          if (token) {
-            await fetch('/api/chat/mentions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({
-                mentions,
-                messageId: insertedData.id,
-                roomName: activeRoomData?.name || activeRoom,
-                fromUsername: displayUsername,
-              }),
-            })
-          }
+          await fetch('/api/chat/mentions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              mentions,
+              messageId: inserted.id,
+              roomName: activeRoomData?.name || activeRoom,
+              fromUsername: userEmail,
+            }),
+          })
         } catch (e) {
           console.error('[CHAT] Mention notification error:', e)
-          // Don't fail message sending if mention notification fails
         }
       }
 
       setNewMessage('')
+      // Optimistic reload will pick up via polling
+      loadMessages(activeRoom)
     } catch (e: any) {
       console.error('[CHAT] Send message error:', e.message || e)
       toast.error(e.message || 'Failed to send message')
@@ -586,44 +309,20 @@ export default function ChatPage() {
 
   async function createPrivateRoom() {
     if (!newRoomName.trim() || !userId) return
-
     try {
-      const { data, error } = await supabase
-        .from('chatrooms')
-        .insert({
-          name: newRoomName.trim(),
-          is_private: true,
-          created_by: userId,
-        })
-        .select()
-        .single()
-
-      if (error) {
-        if (error.code === 'PGRST116' || 
-            error.message?.includes('does not exist') || 
-            error.message?.includes('Could not find the table') ||
-            error.message?.includes('schema cache')) {
-          toast.error('Database tables not set up. Please run database-schema.sql in Supabase SQL Editor.')
-          return
-        }
-        throw error
+      const res = await fetch('/api/chat/create-room', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newRoomName.trim(), is_private: true }),
+      })
+      if (!res.ok) {
+        const t = await res.text()
+        throw new Error(t || 'Failed to create room')
       }
-
-      // Add creator as member
-      const { error: memberError } = await supabase
-        .from('chatroom_members')
-        .insert({
-          chatroom_id: data.id,
-          user_id: userId,
-        })
-
-      if (memberError && memberError.code !== 'PGRST116') {
-        console.warn('Failed to add member, but room created:', memberError)
-      }
-
+      const { room } = await res.json()
       setNewRoomName('')
       setShowCreateRoom(false)
-      setActiveRoom(data.id)
+      if (room?.id) setActiveRoom(room.id)
       loadChatrooms()
       toast.success('Private room created!')
     } catch (e: any) {
@@ -637,29 +336,13 @@ export default function ChatPage() {
       setActiveRoom(roomId)
       return
     }
-
     try {
-      // Check if already a member
-      const { data: existing } = await supabase
-        .from('chatroom_members')
-        .select('id')
-        .eq('chatroom_id', roomId)
-        .eq('user_id', userId)
-        .single()
-
-      if (!existing) {
-        // Join the room
-        const { error } = await supabase
-          .from('chatroom_members')
-          .insert({
-            chatroom_id: roomId,
-            user_id: userId,
-          })
-
-        if (error) throw error
-        toast.success('Joined room!')
-      }
-
+      const res = await fetch('/api/chat/rooms/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId }),
+      })
+      if (!res.ok) throw new Error('join failed')
       setActiveRoom(roomId)
     } catch (e: any) {
       console.error('[CHAT] Join room error:', e)

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { useUser } from '@clerk/nextjs'
 import { toast } from 'sonner'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
@@ -59,97 +59,38 @@ function PublicUploadContent() {
     suggested_plan?: string[]
   } | null>(null)
 
+  const { isLoaded, isSignedIn, user } = useUser()
   useEffect(() => {
-    let mounted = true
-    // Quick check - don't block render
-    supabase.auth.getSession().then(async ({ data, error }) => {
-      if (!mounted) return
-      if (error?.message?.includes('refresh') || error?.message?.includes('Refresh Token')) {
-        supabase.auth.signOut().then(() => router.replace('/'))
-        return
-      }
-      if (data?.session) {
-        // Check if user has username
-        const token = data.session.access_token
-        try {
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (res.ok) {
-            const { hasUsername } = await res.json()
-            if (!hasUsername) {
-              router.replace('/onboarding')
-              return
-            }
-          } else {
-            router.replace('/onboarding')
-            return
-          }
-        } catch (e) {
-          console.error('[PUBLIC-UPLOAD] Check username error:', e)
-          router.replace('/onboarding')
-          return
+    if (!isLoaded) return
+    if (!isSignedIn) { router.replace('/'); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/user/check-username', { cache: 'no-store' })
+        if (cancelled) return
+        if (res.ok) {
+          const { hasUsername } = await res.json()
+          if (!hasUsername) { router.replace('/onboarding'); return }
+        } else {
+          router.replace('/onboarding'); return
         }
-        
-        setIsAuthenticated(true)
-        const email = data.session.user?.email || ''
-        const username = email ? email.split('@')[0] : 'User'
-        setUserEmail(username)
-        setUserId(data.session.user?.id || '')
-      } else {
-        router.replace('/')
+      } catch (e) {
+        console.error('[PUBLIC-UPLOAD] Check username error:', e)
+        router.replace('/onboarding'); return
       }
-    })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
-      if (!mounted) return
-      if (session) {
-        // Check if user has username
-        const token = session.access_token
-        try {
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (res.ok) {
-            const { hasUsername } = await res.json()
-            if (!hasUsername) {
-              router.replace('/onboarding')
-              return
-            }
-          } else {
-            router.replace('/onboarding')
-            return
-          }
-        } catch (e) {
-          console.error('[PUBLIC-UPLOAD] Check username error:', e)
-          router.replace('/onboarding')
-          return
-        }
-        
-        setIsAuthenticated(true)
-        const email = session.user?.email || ''
-        const username = email ? email.split('@')[0] : 'User'
-        setUserEmail(username)
-        setUserId(session.user?.id || '')
-      } else {
-        setIsAuthenticated(false)
-        setUserEmail('')
-        router.replace('/')
-      }
-    })
-    return () => { mounted = false; subscription.unsubscribe() }
-  }, [router])
+      setIsAuthenticated(true)
+      const email = user?.primaryEmailAddress?.emailAddress || ''
+      setUserEmail(email ? email.split('@')[0] : (user?.username || 'User'))
+      setUserId(user?.id || '')
+    })()
+    return () => { cancelled = true }
+  }, [isLoaded, isSignedIn, user, router])
 
   useEffect(() => {
     if (!docId || !isAuthenticated) return
     async function loadDoc() {
       try {
-        const { data: sessionData } = await supabase.auth.getSession()
-        const token = sessionData.session?.access_token
-        if (!token) return
-        
-        const res = await fetch(`/api/documents?t=${Date.now()}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
+        const res = await fetch(`/api/documents?t=${Date.now()}`, { cache: 'no-store' })
         if (res.ok) {
           const { rows } = await res.json()
           const doc = rows?.find((d: any) => d.id === docId)
@@ -175,13 +116,9 @@ function PublicUploadContent() {
 
     setSubmitting(true)
     try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const token = sessionData.session?.access_token
-      if (!token) throw new Error('Not authenticated')
-
       const res = await fetch('/api/public-library/submit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           document_id: docId,
           subject: subject.trim(),

@@ -1,32 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { db } from '@/lib/db'
 import { userProfiles, documents } from '@/lib/db/schema'
-import { sql } from 'drizzle-orm'
+import { requireUserWithEmail } from '@/lib/auth'
+import { getStorageClient } from '@/lib/supabase-storage'
 
 let BUCKET_READY = false
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now()
   try {
-    const authHeader = request.headers.get('authorization')
-    const token = authHeader?.replace('Bearer ', '') || ''
-
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-
-    let authenticatedUser: { id: string; email?: string } | null = null
-    if (token) {
-      const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-      if (authError || !user) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-      }
-      authenticatedUser = { id: user.id, email: user.email || undefined }
-    }
+    const authed = await requireUserWithEmail()
+    if (!authed) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const formData = await request.formData()
     const file = formData.get('file') as File
@@ -38,6 +22,7 @@ export async function POST(request: NextRequest) {
     const fileBuffer = await file.arrayBuffer()
     const fileBytes = new Uint8Array(fileBuffer)
 
+    const supabase = getStorageClient()
     const bucketName = process.env.SUPABASE_STORAGE_BUCKET || 'documents'
     if (!BUCKET_READY) {
       try {
@@ -70,29 +55,27 @@ export async function POST(request: NextRequest) {
     let dbInsertError: any = null
     let inserted: any = null
     try {
-      if (authenticatedUser) {
-        const username = authenticatedUser.email
-          ? authenticatedUser.email.split('@')[0]
-          : `user-${authenticatedUser.id.substring(0, 8)}`
-        try {
-          await db
-            .insert(userProfiles)
-            .values({ id: authenticatedUser.id, username })
-            .onConflictDoNothing({ target: userProfiles.id })
-        } catch (e) {
-          console.warn('[API] upsert user_profiles failed (continuing):', (e as any)?.message || e)
-        }
-
-        const [row] = await db
-          .insert(documents)
-          .values({
-            userId: authenticatedUser.id,
-            fileName: file.name,
-            storagePath: uploadData.path,
-          })
-          .returning({ id: documents.id })
-        inserted = row || null
+      const username = authed.email
+        ? authed.email.split('@')[0]
+        : `user-${authed.id.substring(0, 8)}`
+      try {
+        await db
+          .insert(userProfiles)
+          .values({ id: authed.id, username })
+          .onConflictDoNothing({ target: userProfiles.id })
+      } catch (e) {
+        console.warn('[API] upsert user_profiles failed (continuing):', (e as any)?.message || e)
       }
+
+      const [row] = await db
+        .insert(documents)
+        .values({
+          userId: authed.id,
+          fileName: file.name,
+          storagePath: uploadData.path,
+        })
+        .returning({ id: documents.id })
+      inserted = row || null
     } catch (e: any) {
       dbInsertError = e
     }

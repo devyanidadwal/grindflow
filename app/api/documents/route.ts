@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { db } from '@/lib/db'
 import { documents } from '@/lib/db/schema'
 import { eq, desc } from 'drizzle-orm'
+import { requireUser } from '@/lib/auth'
+import { getStorageClient } from '@/lib/supabase-storage'
 
 let BUCKET_PUBLIC_CACHE: { known: boolean; isPublic: boolean; checkedAt: number } = {
   known: false,
@@ -10,22 +11,10 @@ let BUCKET_PUBLIC_CACHE: { known: boolean; isPublic: boolean; checkedAt: number 
   checkedAt: 0,
 }
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization')
-    const token = authHeader?.replace('Bearer ', '') || ''
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-
-    const { data: auth } = await supabase.auth.getUser(token)
-    const user = auth?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const userId = await requireUser()
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const rows = await db
       .select({
@@ -35,9 +24,10 @@ export async function GET(request: NextRequest) {
         created_at: documents.createdAt,
       })
       .from(documents)
-      .where(eq(documents.userId, user.id))
+      .where(eq(documents.userId, userId))
       .orderBy(desc(documents.createdAt))
 
+    const supabase = getStorageClient()
     const bucketName = process.env.SUPABASE_STORAGE_BUCKET || 'documents'
     let isPublic = BUCKET_PUBLIC_CACHE.isPublic
     const now = Date.now()

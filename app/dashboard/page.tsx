@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import { uploadFiles } from '@/lib/uploadthing'
 import { apiFetch } from '@/lib/api-fetch'
 import SoftCard from '@/components/ui/soft-card'
-import PrettyFlow from '@/components/ui/pretty-flow'
+import MermaidDiagram from '@/components/ui/mermaid-diagram'
 import { motion } from 'framer-motion'
 import ModalPortal from '@/components/ui/modal-portal'
 import UpdateUsernameSection from '@/components/settings/UpdateUsernameSection'
@@ -805,9 +805,7 @@ function DashboardContent() {
                     {studyflowDiagram && (
                       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
                         <h4 className="mb-3 text-lg font-semibold">Flow Diagram</h4>
-                        <SoftCard className="!p-0">
-                          <PrettyFlow content={studyflowDiagram} />
-                        </SoftCard>
+                        <MermaidDiagram chart={studyflowDiagram} />
                         {studyflowDiagram && !studyflowAnalysis && (
                           <div className="mt-3">
                             <button

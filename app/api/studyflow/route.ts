@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
 
     const system = `You are an expert academic study flow analyzer. Analyze educational documents and return concise, structured responses.`
 
-    const diagramPrompt = `Document: ${doc.fileName}\n--- Content ---\n${promptText}\n--- End ---\n\nCreate a FLOW STATE DIAGRAM as ASCII/text showing main topics, dependencies (use ->), and learning order. Keep it clear and concise.\n\nReturn ONLY valid JSON:\n{"flowDiagram": "diagram here with \\n for newlines"}`
+    const diagramPrompt = `Document: ${doc.fileName}\n--- Content ---\n${promptText}\n--- End ---\n\nCreate a Mermaid flowchart (flowchart TD) showing the main topics and their learning dependencies. Use clear node labels. Keep it concise (max 20 nodes).\n\nRules:\n- Use flowchart TD syntax\n- Node IDs must be simple alphanumeric (A, B, C1, etc.)\n- Labels in square brackets: A[Topic Name]\n- Arrows: A --> B\n- No subgraphs needed, keep flat and readable\n\nReturn ONLY valid JSON:\n{"flowDiagram": "flowchart TD\\n  A[Topic] --> B[Subtopic]\\n  ..."}`
 
     const analysisPrompt = `Document: ${doc.fileName}\n--- Content ---\n${promptText}\n--- End ---\n\nCreate a FLOW STATE ANALYSIS: main topics, learning progression, prerequisites, optimal study path. 300-500 words, structured sections.\n\nReturn ONLY valid JSON:\n{"flowAnalysis": "analysis here with \\n for newlines"}`
 

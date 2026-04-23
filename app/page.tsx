@@ -3,6 +3,7 @@
 import { ContainerTextFlip } from '@/components/ui/container-text-flip'
 import Link from 'next/link'
 import SoftCard from '@/components/ui/soft-card'
+import GoogleSignInButton from '@/components/ui/google-sign-in-button'
 export default function Landing() {
 
   return (
@@ -44,9 +45,9 @@ export default function Landing() {
           Upload your notes, get AI feedback, generate quizzes, and earn coins for sharing quality content. Minimalist motion, maximal clarity.
         </p>
 
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link href="/signin" className="btn-primary inline-flex items-center gap-2">Sign in</Link>
-          <Link href="/login" className="btn-secondary inline-flex items-center gap-2">Create account</Link>
+        <div className="mt-8 flex flex-wrap gap-3 items-center">
+          <GoogleSignInButton />
+          <Link href="/signin" className="btn-secondary inline-flex items-center gap-2 text-sm">Other sign in options</Link>
         </div>
 
         <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-3">

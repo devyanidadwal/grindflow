@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
 const geminiApiKey = process.env.GEMINI_API_KEY || ''
-const defaultModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+const defaultModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite'
 
 export interface CallOpts {
   timeoutMs?: number
@@ -44,7 +44,7 @@ export async function callGemini(
 
   const models = Array.from(
     new Set(
-      (opts.models && opts.models.length ? opts.models : [defaultModel, 'gemini-2.5-flash', 'gemini-2.5-flash-lite']).filter(
+      (opts.models && opts.models.length ? opts.models : [defaultModel, 'gemini-2.5-flash-lite', 'gemini-2.5-flash']).filter(
         Boolean
       )
     )

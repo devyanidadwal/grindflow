@@ -44,7 +44,7 @@ export async function callGemini(
 
   const models = Array.from(
     new Set(
-      (opts.models && opts.models.length ? opts.models : [defaultModel, 'gemini-2.5-flash', 'gemini-1.5-flash']).filter(
+      (opts.models && opts.models.length ? opts.models : [defaultModel, 'gemini-2.5-flash', 'gemini-2.5-flash-lite']).filter(
         Boolean
       )
     )
@@ -79,7 +79,7 @@ export async function callGemini(
       try {
         const httpRes = await withTimeout(
           fetch(
-            `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=` +
+            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=` +
               encodeURIComponent(geminiApiKey),
             {
               method: 'POST',

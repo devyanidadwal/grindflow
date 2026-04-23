@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
       callGemini(systemPrompt, userPrompt, {
         timeoutMs: FAST_MODE ? 22_000 : 28_000,
         maxAttempts: 3,
-        models: ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+        models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'],
       })
 
     const baseText = shortText || normalizeForPrompt(text)

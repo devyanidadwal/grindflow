@@ -1,30 +1,21 @@
 "use client"
 
-import { useSignIn } from "@clerk/nextjs"
+import { useRouter } from "next/navigation"
 import { useState } from "react"
 
 export default function GoogleSignInButton() {
-  const { signIn, isLoaded } = useSignIn()
+  const router = useRouter()
   const [loading, setLoading] = useState(false)
 
-  async function handleGoogleSignIn() {
-    if (!isLoaded || loading) return
+  function handleClick() {
     setLoading(true)
-    try {
-      await signIn.authenticateWithRedirect({
-        strategy: "oauth_google",
-        redirectUrl: "/sso-callback",
-        redirectUrlComplete: "/dashboard",
-      })
-    } catch {
-      setLoading(false)
-    }
+    router.push("/signin?strategy=oauth_google")
   }
 
   return (
     <button
-      onClick={handleGoogleSignIn}
-      disabled={!isLoaded || loading}
+      onClick={handleClick}
+      disabled={loading}
       className="inline-flex items-center gap-3 px-5 py-2.5 rounded-[10px] bg-white text-[#1a1a1a] font-semibold text-sm hover:bg-white/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_2px_12px_rgba(0,0,0,0.3)]"
     >
       {loading ? (

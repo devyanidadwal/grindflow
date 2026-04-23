@@ -1,30 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { db } from '@/lib/db'
 import { documents, publicLibrary } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+import { requireUser } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization')
-    const token = authHeader?.replace('Bearer ', '') || ''
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const userId = await requireUser()
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await req.json()
     const { document_id, subject, unit, year, degree, score, analysis_keyword, verdict, rationale, focus_topics, repetitive_topics, suggested_plan } = body || {}
     if (!document_id || !subject) {
       return NextResponse.json({ error: 'Missing document_id or subject' }, { status: 400 })
     }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-    const { data: auth } = await supabase.auth.getUser(token)
-    const user = auth?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const [doc] = await db
       .select({ id: documents.id, userId: documents.userId })
@@ -33,7 +22,7 @@ export async function POST(req: NextRequest) {
       .limit(1)
 
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
-    if (doc.userId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (doc.userId !== userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const values = {
       documentId: document_id,
@@ -48,7 +37,7 @@ export async function POST(req: NextRequest) {
       focusTopics: focus_topics ? JSON.stringify(focus_topics) : null,
       repetitiveTopics: repetitive_topics ? JSON.stringify(repetitive_topics) : null,
       suggestedPlan: suggested_plan ? JSON.stringify(suggested_plan) : null,
-      uploadedBy: user.id,
+      uploadedBy: userId,
       uploadedAt: new Date().toISOString(),
     }
 

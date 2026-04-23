@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 
 interface UpdateUsernameSectionProps {
@@ -18,14 +17,7 @@ export default function UpdateUsernameSection({ userEmail }: UpdateUsernameSecti
   useEffect(() => {
     async function fetchCurrentUsername() {
       try {
-        const { data: sessionData } = await supabase.auth.getSession()
-        if (!sessionData.session) return
-
-        const token = sessionData.session.access_token
-        const res = await fetch('/api/user/check-username', {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-
+        const res = await fetch('/api/user/check-username', { cache: 'no-store' })
         if (res.ok) {
           const { username } = await res.json()
           setCurrentUsername(username || 'Not set')
@@ -67,19 +59,9 @@ export default function UpdateUsernameSection({ userEmail }: UpdateUsernameSecti
     setLoading(true)
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      if (!sessionData.session) {
-        toast.error('Not authenticated')
-        return
-      }
-
-      const token = sessionData.session.access_token
       const res = await fetch('/api/user/set-username', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: trimmedUsername }),
       })
 

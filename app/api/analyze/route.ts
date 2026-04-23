@@ -1,44 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import pdfParse from 'pdf-parse'
-import { GoogleGenerativeAI } from '@google/generative-ai'
 import { normalizeForPrompt, buildShortText } from '@/lib/text'
 import { db } from '@/lib/db'
 import { documents, documentsText, documentsMetadata } from '@/lib/db/schema'
-import { eq, sql } from 'drizzle-orm'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-const bucketName = process.env.SUPABASE_STORAGE_BUCKET || 'documents'
-const geminiApiKey = process.env.GEMINI_API_KEY || ''
-const defaultModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+import { eq } from 'drizzle-orm'
+import { requireUser } from '@/lib/auth'
+import { checkAiRateLimit, rateLimitHeaders } from '@/lib/rate-limit'
+import { callGemini, GeminiUnavailableError } from '@/lib/gemini'
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization')
-    const token = authHeader?.replace('Bearer ', '') || ''
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const userId = await requireUser()
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const rl = checkAiRateLimit(userId, 'analyze')
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Slow down and try again in a moment.' },
+        { status: 429, headers: rateLimitHeaders(rl) }
+      )
+    }
 
     const body = await req.json()
     const { id, context } = body || {}
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
-
-    const { data: auth } = await supabase.auth.getUser(token)
-    const user = auth?.user
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
     const [doc] = await db
-      .select({ id: documents.id, userId: documents.userId, storagePath: documents.storagePath, fileName: documents.fileName })
+      .select({ id: documents.id, userId: documents.userId, storagePath: documents.storagePath, fileName: documents.fileName, fileUrl: documents.fileUrl })
       .from(documents)
       .where(eq(documents.id, id))
       .limit(1)
 
     if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    if (doc.userId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (doc.userId !== userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     let text = ''
     let shortText = ''
@@ -54,10 +48,10 @@ export async function POST(req: NextRequest) {
     } catch {}
 
     if (!text) {
-      const { data: fileData, error: dlErr } = await supabase.storage.from(bucketName).download(doc.storagePath)
-      if (dlErr || !fileData) return NextResponse.json({ error: dlErr?.message || 'Download failed' }, { status: 500 })
-
-      const arrayBuffer = await fileData.arrayBuffer()
+      if (!doc.fileUrl) return NextResponse.json({ error: 'File URL missing' }, { status: 500 })
+      const fileRes = await fetch(doc.fileUrl)
+      if (!fileRes.ok) return NextResponse.json({ error: 'Download failed' }, { status: 500 })
+      const arrayBuffer = await fileRes.arrayBuffer()
       const buffer = Buffer.from(arrayBuffer)
       const parsed = await pdfParse(buffer)
       text = parsed.text || ''
@@ -89,13 +83,6 @@ export async function POST(req: NextRequest) {
     const maxChars = 18000
     if (promptText.length > maxChars) promptText = promptText.slice(0, maxChars) + '\n... [truncated]'
 
-    if (!geminiApiKey) {
-      return NextResponse.json({ error: 'Gemini API key missing on server' }, { status: 500 })
-    }
-
-    const genAI = new GoogleGenerativeAI(geminiApiKey)
-    let model = genAI.getGenerativeModel({ model: defaultModel })
-
     const system = `You are an academic document rater. Score a PDF from 0 to 100 based on how well it serves the user's stated purpose. Consider coverage, accuracy, organization, clarity, depth, recency (if relevant), and usefulness.
 Return STRICT JSON with keys only:
 {
@@ -109,31 +96,17 @@ Return STRICT JSON with keys only:
 
     const prompt = `User purpose/context: "${context || 'General study'}"\nDocument: ${doc.fileName}\n--- Begin Extracted Text (truncated) ---\n${promptText}\n--- End Extracted Text ---\nRespond with JSON only.`
 
-    let output = ''
+    let output: string
     try {
-      const result = await model.generateContent([system, prompt])
-      output = result.response.text()
-    } catch (sdkErr: any) {
-      try {
-        const httpModel = defaultModel || 'gemini-pro'
-        const httpRes = await fetch(`https://generativelanguage.googleapis.com/v1/models/${httpModel}:generateContent?key=` + encodeURIComponent(geminiApiKey), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: `${system}\n\n${prompt}` }] }],
-          }),
-        })
-        if (!httpRes.ok) {
-          const errText = await httpRes.text()
-          throw new Error(errText)
-        }
-        const data = await httpRes.json()
-        output = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      } catch (httpErr: any) {
-        throw new Error(httpErr?.message || sdkErr?.message || 'Gemini call failed')
+      output = await callGemini(system, prompt, { timeoutMs: 22_000, maxAttempts: 3 })
+    } catch (e: any) {
+      if (e instanceof GeminiUnavailableError) {
+        return NextResponse.json({ error: e.message }, { status: 503 })
       }
+      throw e
     }
-    let json
+
+    let json: any
     try {
       json = JSON.parse(output)
     } catch {
@@ -151,7 +124,7 @@ Return STRICT JSON with keys only:
         })
     } catch {}
 
-    return NextResponse.json({ id: doc.id, result: json })
+    return NextResponse.json({ id: doc.id, result: json }, { headers: rateLimitHeaders(rl) })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }

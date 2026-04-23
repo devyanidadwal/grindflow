@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
+import { useClerk, useUser } from '@clerk/nextjs'
 
 interface SidebarProps {
   activeView: string
@@ -14,65 +14,31 @@ interface SidebarProps {
 export default function Sidebar({ activeView, onViewChange, username }: SidebarProps) {
   const [userEmail, setUserEmail] = useState<string>(username || "User")
   const router = useRouter()
+  const { signOut } = useClerk()
+  const { isSignedIn, user } = useUser()
 
   useEffect(() => {
-    // Non-blocking auth check
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (data?.session) {
-        const token = data.session.access_token
-        try {
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (res.ok) {
-            const { username: profileUsername } = await res.json()
-            if (profileUsername) {
-              setUserEmail(profileUsername)
-            } else {
-              // Fallback to email username
-              const email = data.session.user?.email || ''
-              const username = email ? email.split('@')[0] : 'User'
-              setUserEmail(username)
-            }
-          }
-        } catch (e) {
-          // Fallback to email username
-          const email = data.session.user?.email || ''
-          const username = email ? email.split('@')[0] : 'User'
-          setUserEmail(username)
-        }
-      }
-    })
+    if (!isSignedIn) return
+    let cancelled = false
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
-      if (session) {
-        const token = session.access_token
-        try {
-          const res = await fetch('/api/user/check-username', {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (res.ok) {
-            const { username: profileUsername } = await res.json()
-            if (profileUsername) {
-              setUserEmail(profileUsername)
-            } else {
-              // Fallback to email username
-              const email = session.user?.email || ''
-              const username = email ? email.split('@')[0] : 'User'
-              setUserEmail(username)
-            }
+    ;(async () => {
+      try {
+        const res = await fetch('/api/user/check-username', { cache: 'no-store' })
+        if (cancelled) return
+        if (res.ok) {
+          const { username: profileUsername } = await res.json()
+          if (profileUsername) {
+            setUserEmail(profileUsername)
+            return
           }
-        } catch (e) {
-          // Fallback to email username
-          const email = session.user?.email || ''
-          const username = email ? email.split('@')[0] : 'User'
-          setUserEmail(username)
         }
-      }
-    })
+      } catch {}
+      const email = user?.primaryEmailAddress?.emailAddress || ''
+      setUserEmail(email ? email.split('@')[0] : (user?.username || 'User'))
+    })()
 
-    return () => subscription.unsubscribe()
-  }, [])
+    return () => { cancelled = true }
+  }, [isSignedIn, user])
 
   const navItems = useMemo(() => ([
     { id: 'home', label: 'Home', icon: (
@@ -119,7 +85,7 @@ export default function Sidebar({ activeView, onViewChange, username }: SidebarP
   ]), [])
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await signOut()
     router.push('/')
   }
 
@@ -127,15 +93,15 @@ export default function Sidebar({ activeView, onViewChange, username }: SidebarP
     <aside className="w-[260px] p-6 flex flex-col gap-[18px] bg-gradient-to-b from-white/2 to-white/1 border-r border-white/3 min-h-screen">
       <div className="flex gap-3 items-center">
         <div className="w-18 h-14 rounded-xl bg-gradient-to-br from-accent to-[#9ad4ff] overflow-hidden flex items-center justify-center">
-  <img 
-    src="/49081F90-0AE7-46AD-BAF4-D21147D31B37_1_201_a.jpeg" 
-    alt="Logo" 
-    className="h-full w-auto object-contain"
-  />
-</div>
+          <img
+            src="/49081F90-0AE7-46AD-BAF4-D21147D31B37_1_201_a.jpeg"
+            alt="Logo"
+            className="h-full w-auto object-contain"
+          />
+        </div>
         <div>
-        <h1 className="m-0 text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white to-white/90 bg-clip-text">GrindFlow</h1>
-<p className="m-0 text-[10px] text-muted/70 tracking-wide uppercase font-medium">Peer-powered study notes</p>
+          <h1 className="m-0 text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white to-white/90 bg-clip-text">GrindFlow</h1>
+          <p className="m-0 text-[10px] text-muted/70 tracking-wide uppercase font-medium">Peer-powered study notes</p>
         </div>
       </div>
 
@@ -143,15 +109,11 @@ export default function Sidebar({ activeView, onViewChange, username }: SidebarP
         {navItems.map((item) => {
           const isActive = activeView === item.id
           const handleClick = () => {
-            if (item.id === 'explore') {
-              router.push('/explore')
-            } else if (item.id === 'chat') {
-              router.push('/chat')
-            } else {
-              onViewChange(item.id)
-            }
+            if (item.id === 'explore') router.push('/explore')
+            else if (item.id === 'chat') router.push('/chat')
+            else onViewChange(item.id)
           }
-          
+
           return (
             <motion.button
               key={item.id}
@@ -176,7 +138,6 @@ export default function Sidebar({ activeView, onViewChange, username }: SidebarP
           )
         })}
 
-        {/* About the team direct link */}
         <motion.button
           key="about"
           onClick={() => router.push('/about')}
@@ -208,4 +169,3 @@ export default function Sidebar({ activeView, onViewChange, username }: SidebarP
     </aside>
   )
 }
-
